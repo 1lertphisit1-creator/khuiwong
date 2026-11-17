@@ -21,7 +21,9 @@ import {
 import { EtfFeed, type EtfBoard } from './etf.ts'
 import { NewsFeed, newsConfig } from './news.ts'
 import { PriceFeed, type PriceBoard } from './prices.ts'
+import { musicSettings, saveMusicUrl, type MusicSetting } from './music.ts'
 import {
+  accountHasStaffRank,
   addBan,
   countDjTracks,
   deleteDjTrack,
@@ -90,6 +92,7 @@ type PublicParticipant = {
   audio: boolean
   video: boolean
   sharing: boolean
+  screenAudio: boolean
   textMuted: boolean
   micMuted: boolean
   micBlocked: boolean
@@ -132,6 +135,7 @@ type LiveUser = {
   audio: boolean
   video: boolean
   sharing: boolean
+  screenAudio: boolean
   handRaised: boolean
   speaker: boolean
   speaking: boolean
@@ -170,7 +174,7 @@ type ClientToServer = {
   chat: (payload: { text?: string }) => void
   signal: (payload: { to?: string; data?: SignalData }) => void
   'media-state': (payload: { audio?: boolean; video?: boolean }) => void
-  'screen-state': (payload: { sharing?: boolean }) => void
+  'screen-state': (payload: { sharing?: boolean; audio?: boolean }) => void
   'raise-hand': (payload: { raised?: boolean }) => void
   'take-slot': () => void
   'grant-speaker': (payload: { socketId?: string }) => void
@@ -224,13 +228,14 @@ type ServerToClient = {
   'screen-end': (payload: { id: string; gen: number }) => void
   prices: (payload: PriceBoard) => void
   'etf-flows': (payload: EtfBoard) => void
+  'site-settings': (payload: MusicSetting) => void
   'news-posts': (payload: { id: string; text: string; createdAt: string; url: string }[]) => void
   'participant-joined': (participant: PublicParticipant) => void
   'participant-left': (payload: { id: string }) => void
   'participant-updated': (participant: PublicParticipant) => void
   'chat-message': (message: ChatMessage) => void
   'media-state': (payload: { id: string; audio: boolean; video: boolean }) => void
-  'screen-state': (payload: { id: string; sharing: boolean }) => void
+  'screen-state': (payload: { id: string; sharing: boolean; audio: boolean }) => void
   'media-control': (payload: { micAllowed: boolean; camAllowed: boolean; screenAllowed: boolean; textMuted: boolean }) => void
   policy: (payload: { micMinRank: RankId; camMinRank: RankId; screenMinRank: RankId }) => void
   'rank-colors': (payload: Record<RankId, string>) => void
@@ -463,6 +468,7 @@ function toPublic(live: LiveRoom, user: LiveUser): PublicParticipant {
     audio: user.audio && canUseMic(live, user),
     video: user.video && canUseCam(live, user),
     sharing: user.sharing && canShare(live, user),
+    screenAudio: user.sharing && user.screenAudio && canShare(live, user),
     textMuted: user.textMuted,
     micMuted: user.micMuted,
     micBlocked: user.micBlocked,
@@ -526,6 +532,7 @@ function broadcastUser(io: AppServer, roomId: string, live: LiveRoom, user: Live
   io.to(roomId).emit('screen-state', {
     id: user.socketId,
     sharing: participant.sharing,
+    audio: participant.screenAudio,
   })
 }
 
@@ -700,6 +707,29 @@ async function main() {
   }
   app.get('/api/health', health)
   app.get('/health', health)
+  app.get('/api/settings', (_req, res) => {
+    res.json(musicSettings())
+  })
+
+  app.put('/api/settings/music', (req, res) => {
+    const account = accountFromToken(bearer(req))
+    if (!account) {
+      res.status(401).json({ message: 'เข้าสู่ระบบก่อนเปลี่ยนเพลงพื้นหลัง' })
+      return
+    }
+    if (!isSiteOwnerAccount(account.id) && !accountHasStaffRank(account.id)) {
+      res.status(403).json({ message: 'เฉพาะเจ้าของหรือผู้ดูแลที่เปลี่ยนเพลงพื้นหลังได้' })
+      return
+    }
+    const saved = saveMusicUrl(typeof req.body?.musicUrl === 'string' ? req.body.musicUrl : '')
+    if (!saved) {
+      res.status(400).json({ message: 'ใส่ลิงก์ YouTube ของวิดีโอหรือเพลย์ลิสต์' })
+      return
+    }
+    io.emit('site-settings', saved)
+    res.json(saved)
+  })
+
   app.get('/api/rooms/active', (_req, res) => {
     const list = [...rooms.entries()]
       .map(([id, live]) => ({
@@ -915,6 +945,7 @@ async function main() {
     if (board) socket.emit('prices', board)
     if (news.posts.length > 0) socket.emit('news-posts', news.posts)
     if (etf.board) socket.emit('etf-flows', etf.board)
+    socket.emit('site-settings', musicSettings())
     socket.on('join', (payload) => {
       const roomId = cleanRoomId(payload?.roomId)
       const account = accountFromToken(payload?.token)
@@ -1021,6 +1052,7 @@ async function main() {
         audio: Boolean(payload?.audio),
         video: false,
         sharing: false,
+        screenAudio: false,
         handRaised: false,
         speaker: false,
         speaking: false,
@@ -1105,8 +1137,9 @@ async function main() {
       const want = Boolean(payload?.sharing) && canShare(context.live, context.user)
       const was = context.user.sharing
       context.user.sharing = want
+      context.user.screenAudio = want && Boolean(payload?.audio)
       const view = toPublic(context.live, context.user)
-      io.to(context.roomId).emit('screen-state', { id: socket.id, sharing: view.sharing })
+      io.to(context.roomId).emit('screen-state', { id: socket.id, sharing: view.sharing, audio: view.screenAudio })
       io.to(context.roomId).emit('participant-updated', view)
       if (want !== was) {
         pushMessage(
