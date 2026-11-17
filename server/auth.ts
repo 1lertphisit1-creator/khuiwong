@@ -4,8 +4,11 @@ import {
   findAccountById,
   findAccountByKey,
   findSession,
+  grantOwnerMembership,
   insertAccount,
   insertSession,
+  listRoomIds,
+  updateAccountPassword,
   type AccountRow,
 } from './db.ts'
 
@@ -46,8 +49,58 @@ export function verifyPassword(password: string, stored: string) {
   return timingSafeEqual(actual, expected)
 }
 
+let reservedOwnerKey: string | null = null
+let siteOwnerAccountId: string | null = null
+
+export function siteOwnerUsername() {
+  const raw = process.env.SITE_OWNER_USERNAME?.trim() || 'fibo99'
+  return cleanNickname(raw) ?? 'fibo99'
+}
+
+export function isSiteOwnerAccount(accountId: string | null | undefined) {
+  return Boolean(accountId && siteOwnerAccountId && accountId === siteOwnerAccountId)
+}
+
+export function grantSiteOwnerRoom(roomId: string) {
+  if (!siteOwnerAccountId) return
+  grantOwnerMembership(roomId, siteOwnerAccountId)
+}
+
+export function ensureSiteOwner() {
+  const username = siteOwnerUsername()
+  reservedOwnerKey = nicknameKey(username)
+  const password = process.env.SITE_OWNER_PASSWORD?.trim() ?? ''
+  if (!password) {
+    console.log(`SITE_OWNER reserved without password: ${username}`)
+    return
+  }
+  if (!cleanPassword(password)) {
+    console.log('SITE_OWNER_PASSWORD must be 8–72 characters; username stays reserved')
+    return
+  }
+  const key = nicknameKey(username)
+  let account = findAccountByKey(key)
+  const passwordHash = hashPassword(password)
+  if (!account) {
+    account = {
+      id: randomBytes(12).toString('base64url'),
+      nickname: username,
+      nickname_key: key,
+      password_hash: passwordHash,
+      created_at: Date.now(),
+    }
+    insertAccount(account)
+  } else {
+    updateAccountPassword(account.id, passwordHash)
+  }
+  siteOwnerAccountId = account.id
+  for (const roomId of listRoomIds()) grantOwnerMembership(roomId, account.id)
+  console.log(`SITE_OWNER ready: ${username}`)
+}
+
 export function registerAccount(nickname: string, password: string) {
   const key = nicknameKey(nickname)
+  if (reservedOwnerKey && key === reservedOwnerKey) return { error: 'ชื่อนี้ถูกสงวนไว้' as const }
   if (findAccountByKey(key)) return { error: 'ชื่อนี้ถูกใช้แล้ว' as const }
   const account: AccountRow = {
     id: randomBytes(12).toString('base64url'),

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
+import { FollowLinks } from '@/components/FollowLinks.tsx'
 import { Logo } from '@/components/Logo.tsx'
 import { rememberName, stageEntry, storedName } from '@/lib/entry.ts'
 import { acquireMedia } from '@/lib/media.ts'
@@ -70,37 +71,45 @@ export function Lobby() {
 
   return (
     <main data-testid="lobby" className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col justify-center px-4 py-8 sm:px-8">
-      <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,28rem)]">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <Logo />
+        <p className="rounded-full border border-gold/40 bg-ink/60 px-3 py-1 text-sm text-gold">เจ้าของ: FIBO99</p>
+      </header>
+      <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1.618fr)_minmax(20rem,1fr)]">
         <section>
-          <Logo />
-          <p className="mt-6 inline-flex items-center gap-2 rounded-full border border-amber/40 bg-amber/10 px-3 py-1 text-sm text-amber">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber" />
-            เจ้าของห้องต้องมีบัญชี ผู้มาเยือนเข้าได้
-          </p>
-          <h1 className="font-display mt-5 max-w-xl text-4xl leading-[1.2] font-bold sm:text-5xl">
-            คุยด้วยกัน
-            <span className="mt-1 block text-amber">ข้อความ เสียง และกล้อง</span>
+          <figure className="ornament-panel overflow-hidden rounded-[1.4rem]">
+            <img
+              src="/brand/fibo99-hero.webp"
+              alt="มาสคอต FIBO99 ชายชราในชุดคลุมบุกันดี ถือดินสอ fibonacci 0.875"
+              width={960}
+              height={960}
+              className="aspect-[4/3] max-h-72 w-full object-cover object-[center_18%] sm:aspect-square sm:max-h-[28rem] lg:max-h-[34rem]"
+            />
+          </figure>
+          <h1 className="font-display mt-5 max-w-xl text-4xl leading-[1.25] font-bold sm:text-5xl">
+            คุยวง
+            <span className="mt-1 block text-gold">by FIBO99</span>
           </h1>
           <p className="mt-4 max-w-lg text-base leading-relaxed text-muted-foreground sm:text-lg">
-            สร้างห้องแล้วคุณเป็นเจ้าของ ตั้งยศ สีชื่อ ปิดไมค์ หรือเปิดเพลงให้ทุกคนในห้องได้
+            ห้องสนทนาสดสำหรับวงเล็ก ๆ ข้อความ เสียง กล้อง และแชร์หน้าจอ ในบรรยากาศเรียบหรูของ FIBO99
           </p>
-          <ul className="mt-8 space-y-3 text-sm sm:text-base">
+          <ul className="mt-6 space-y-3 text-sm sm:text-base">
             <li className="flex gap-3">
-              <span className="font-display w-8 shrink-0 text-lg text-amber">01</span>
+              <span className="font-display w-8 shrink-0 text-lg text-gold">01</span>
               <span>ยศติดกับชื่อบัญชี ออกแล้วเข้าใหม่ก็ยังอยู่</span>
             </li>
             <li className="flex gap-3">
-              <span className="font-display w-8 shrink-0 text-lg text-teal">02</span>
+              <span className="font-display w-8 shrink-0 text-lg text-cream">02</span>
               <span>เจ้าของกับผู้ดูแลเตะ แบน ปิดแชต และล็อกกล้องได้</span>
             </li>
             <li className="flex gap-3">
-              <span className="font-display w-8 shrink-0 text-lg text-paper">03</span>
+              <span className="font-display w-8 shrink-0 text-lg text-gold">03</span>
               <span>ดีเจเปิดเพลงจากเซิร์ฟเวอร์ ให้ทุกคนได้ยินตรงกัน</span>
             </li>
           </ul>
         </section>
 
-        <div className="rounded-[1.6rem] border border-border bg-card/90 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur sm:p-6">
+        <div className="ornament-panel rounded-[1.6rem] p-5 sm:p-6">
           {account ? (
             <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl bg-ink px-3 py-2">
               <p className="text-sm">
@@ -168,9 +177,9 @@ export function Lobby() {
           {!account ? <p className="mt-2 text-xs text-muted-foreground">สร้างห้องได้เมื่อเข้าสู่ระบบแล้วเท่านั้น</p> : null}
 
           <div className="my-5 flex items-center gap-3 text-xs tracking-wide text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
+            <span className="gold-rule flex-1" />
             มีรหัสหรือลิงก์อยู่แล้ว
-            <span className="h-px flex-1 bg-border" />
+            <span className="gold-rule flex-1" />
           </div>
 
           <form
@@ -233,9 +242,12 @@ export function Lobby() {
           )}
         </div>
       </div>
-      <p className="mt-10 text-sm text-muted-foreground">
+      <p className="mt-8 text-sm text-muted-foreground">
         ยศ สีชื่อ และเพลงอยู่ในฐานข้อมูลของเซิร์ฟเวอร์ ข้อความแชตยังอยู่แค่ตอนที่มีคนในห้อง
       </p>
+      <div className="ornament-panel mt-4 overflow-hidden rounded-[1.2rem]">
+        <FollowLinks className="border-t-0" />
+      </div>
     </main>
   )
 }

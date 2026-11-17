@@ -17,3 +17,7 @@ services:
         value: "22"
       - key: DATA_DIR
         value: /opt/render/project/src/data
+      - key: SITE_OWNER_USERNAME
+        value: fibo99
+      - key: SITE_OWNER_PASSWORD
+        sync: false
