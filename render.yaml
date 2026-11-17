@@ -1,0 +1,19 @@
+# Render Blueprint: one free Node web service in Singapore.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: khuiwong
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_DIR
+        value: /opt/render/project/src/data
