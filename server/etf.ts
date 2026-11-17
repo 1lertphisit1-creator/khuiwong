@@ -40,6 +40,8 @@ export class EtfFeed {
   board: EtfBoard | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private repriceTimer: ReturnType<typeof setInterval> | null = null
+  private priceTries = 0
+  private pricing = false
   private onBoard: (board: EtfBoard) => void
   private livePrice: (asset: 'BTC' | 'ETH') => number | null
 
@@ -60,7 +62,7 @@ export class EtfFeed {
   start() {
     void this.refresh()
     this.timer = setInterval(() => void this.refresh(), 45 * 60 * 1000)
-    this.repriceTimer = setInterval(() => void this.fillPrices(), 20_000)
+    this.repriceTimer = setInterval(() => void this.fillPrices(), 45_000)
   }
 
   stop() {
@@ -71,10 +73,17 @@ export class EtfFeed {
   async refresh() {
     try {
       const [btcRaw, ethRaw] = await Promise.all([this.loadAsset('BTC'), this.loadAsset('ETH')])
-      const [btc, eth] = await Promise.all([
-        btcRaw.asset ? this.priced(btcRaw.asset).then((asset) => ({ ...btcRaw, asset })) : Promise.resolve(btcRaw),
-        ethRaw.asset ? this.priced(ethRaw.asset).then((asset) => ({ ...ethRaw, asset })) : Promise.resolve(ethRaw),
-      ])
+      this.pricing = true
+      let btcAsset: EtfAsset | null = null
+      let ethAsset: EtfAsset | null = null
+      try {
+        btcAsset = btcRaw.asset ? await this.priced(btcRaw.asset) : null
+        ethAsset = ethRaw.asset ? await this.priced(ethRaw.asset) : null
+      } finally {
+        this.pricing = false
+      }
+      const btc = { ...btcRaw, asset: btcAsset }
+      const eth = { ...ethRaw, asset: ethAsset }
       if (!btc.asset && !eth.asset) throw new Error('empty')
       const source = btc.source === 'farside' || eth.source === 'farside' ? 'farside' : 'farside-archive'
       const board: EtfBoard = {
@@ -117,13 +126,16 @@ export class EtfFeed {
   }
 
   private async fillPrices() {
+    if (this.pricing) return
     const board = this.board
     if (!board) return
-    const missing = [board.btc, board.eth].some((asset) => asset && asset.totalCoin == null)
-    if (!missing) return
+    this.pricing = true
+    const missing = [board.btc, board.eth].some((asset) => asset && (asset.totalCoin == null || asset.priceBasis !== 'close'))
+    if (!missing || this.priceTries >= 4) return
+    this.priceTries += 1
     try {
-      const btc = board.btc ? await this.priced(board.btc) : null
-      const eth = board.eth ? await this.priced(board.eth) : null
+      const btc = board.btc && board.btc.priceBasis !== 'close' ? await this.priced(board.btc) : board.btc
+      const eth = board.eth && board.eth.priceBasis !== 'close' ? await this.priced(board.eth) : board.eth
       if (btc?.totalCoin == null && eth?.totalCoin == null) return
       const next: EtfBoard = { ...board, btc, eth, updatedAt: Date.now() }
       this.board = next
@@ -132,6 +144,8 @@ export class EtfFeed {
       console.log(`[etf] repriced btc=${btc?.totalCoin ?? '-'} eth=${eth?.totalCoin ?? '-'}`)
     } catch (error) {
       console.warn('[etf] reprice failed', error instanceof Error ? error.message : error)
+    } finally {
+      this.pricing = false
     }
   }
 }
@@ -292,12 +306,18 @@ async function coingeckoCloses(asset: 'BTC' | 'ETH') {
   const found = new Map<string, number>()
   const id = asset === 'BTC' ? 'bitcoin' : 'ethereum'
   try {
-    const response = await fetch(
-      `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=21&interval=daily`,
-      { headers: { Accept: 'application/json' } },
-    )
-    if (!response.ok) {
-      console.warn(`[etf] coingecko ${id} ${response.status}`)
+    let response: Response | null = null
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      response = await fetch(
+        `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=14&interval=daily`,
+        { headers: { Accept: 'application/json' } },
+      )
+      if (response.status !== 429) break
+      console.warn(`[etf] coingecko ${id} 429`)
+      await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)))
+    }
+    if (!response?.ok) {
+      console.warn(`[etf] coingecko ${id} ${response?.status ?? 'error'}`)
       return found
     }
     const body = (await response.json()) as { prices?: [number, number][] }
