@@ -21,3 +21,9 @@ services:
         value: fibo99
       - key: SITE_OWNER_PASSWORD
         sync: false
+      - key: NEWS_FACEBOOK_PAGE
+        value: https://www.facebook.com/bitcoin.chiangrai
+      - key: NEWS_X_HANDLE
+        value: WatcherGuru
+      - key: X_BEARER_TOKEN
+        sync: false
