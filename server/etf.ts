@@ -221,6 +221,12 @@ async function priceAsset(asset: EtfAsset, liveFallback: number | null): Promise
   const symbol = asset.asset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT'
   const dates = asset.history.map((day) => day.date)
   const closes = await dailyCloses(symbol, dates)
+  if (dates.some((date) => !closes.has(date))) {
+    const extra = await coingeckoCloses(asset.asset)
+    for (const [date, price] of extra) {
+      if (!closes.has(date)) closes.set(date, price)
+    }
+  }
   const missing = dates.some((date) => !closes.has(date))
   const spot = missing ? (await spotPrice(symbol)) ?? liveFallback : null
   const latestPrice = closes.get(asset.date) ?? spot ?? liveFallback
@@ -278,6 +284,31 @@ async function dailyCloses(symbol: string, dates: string[]) {
     } catch {
       // Try the next public host.
     }
+  }
+  return found
+}
+
+async function coingeckoCloses(asset: 'BTC' | 'ETH') {
+  const found = new Map<string, number>()
+  const id = asset === 'BTC' ? 'bitcoin' : 'ethereum'
+  try {
+    const response = await fetch(
+      `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=21&interval=daily`,
+      { headers: { Accept: 'application/json' } },
+    )
+    if (!response.ok) {
+      console.warn(`[etf] coingecko ${id} ${response.status}`)
+      return found
+    }
+    const body = (await response.json()) as { prices?: [number, number][] }
+    for (const point of body.prices ?? []) {
+      const [time, price] = point
+      if (!(price > 0)) continue
+      const date = new Date(time).toISOString().slice(0, 10)
+      if (!found.has(date)) found.set(date, price)
+    }
+  } catch (error) {
+    console.warn('[etf] coingecko', error instanceof Error ? error.message : error)
   }
   return found
 }
