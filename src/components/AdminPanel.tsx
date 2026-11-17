@@ -107,7 +107,7 @@ export function AdminPanel({
                   </label>
                 ) : (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {person.accountId ? 'ยศนี้เปลี่ยนจากแผงนี้ไม่ได้' : 'ผู้มาเยือนไม่มีบัญชี เตะหรือแบนได้ แต่ยศจะไม่จำ'}
+                    {person.accountId ? 'ยศถาวร' : 'ไม่มีบัญชี'}
                   </p>
                 )}
                 {person.accountId && permissions.manageColors && (lower || self) ? (

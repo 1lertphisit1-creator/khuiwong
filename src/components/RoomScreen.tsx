@@ -124,7 +124,6 @@ export function RoomScreen({
       <header className="flex items-center gap-2 border-b border-gold/35 bg-burgundy/80 px-3 py-2.5 backdrop-blur sm:gap-4 sm:px-4">
         <Logo compact />
         <div className="min-w-0">
-          <div className="text-[11px] tracking-wide text-muted-foreground">รหัสห้อง</div>
           <div className="flex items-center gap-1">
             <span data-testid="room-code" className="font-mono text-lg tracking-[0.18em]">
               {entry.code}

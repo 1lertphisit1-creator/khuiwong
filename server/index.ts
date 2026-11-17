@@ -692,6 +692,17 @@ async function main() {
   }
   app.get('/api/health', health)
   app.get('/health', health)
+  app.get('/api/rooms/active', (_req, res) => {
+    const list = [...rooms.entries()]
+      .map(([id, live]) => ({
+        id,
+        people: live.participants.size,
+        speakers: [...live.participants.values()].filter((user) => user.speaker).length,
+      }))
+      .filter((room) => room.people > 0)
+      .sort((a, b) => b.people - a.people || a.id.localeCompare(b.id))
+    res.json({ rooms: list })
+  })
 
   const prices = new PriceFeed((board) => {
     io.emit('prices', board)

@@ -176,7 +176,7 @@ function ScreenTheater({
 function InviteCard() {
   return (
     <div className="grid min-h-36 place-items-center rounded-[1.3rem] border border-dashed border-gold/30 px-4 text-center text-sm text-muted-foreground">
-      ส่งลิงก์ห้องให้คนที่อยากคุยด้วย
+      รอเพื่อน
     </div>
   )
 }

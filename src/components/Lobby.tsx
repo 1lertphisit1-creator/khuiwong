@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
 import { FollowLinks } from '@/components/FollowLinks.tsx'
-import { Logo } from '@/components/Logo.tsx'
 import { rememberName, stageEntry, storedName } from '@/lib/entry.ts'
 import { acquireMedia } from '@/lib/media.ts'
 import { cleanDisplayName, extractRoomCode } from '@/lib/roomCode.ts'
 import { go } from '@/lib/route.ts'
 import { api, clearSession, currentAccount, saveSession, type Account } from '@/lib/session.ts'
+
+type LiveRoom = { id: string; people: number; speakers: number }
 
 export function Lobby() {
   const [account, setAccount] = useState<Account | null>(null)
@@ -17,9 +18,28 @@ export function Lobby() {
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<'create' | 'join' | 'auth' | null>(null)
+  const [rooms, setRooms] = useState<LiveRoom[]>([])
 
   useEffect(() => {
     void currentAccount().then(setAccount)
+  }, [])
+
+  useEffect(() => {
+    let stopped = false
+    const load = () => {
+      void fetch('/api/rooms/active')
+        .then((response) => (response.ok ? response.json() : { rooms: [] }))
+        .then((data: { rooms?: LiveRoom[] }) => {
+          if (!stopped) setRooms(data.rooms ?? [])
+        })
+        .catch(() => {})
+    }
+    load()
+    const timer = window.setInterval(load, 8000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
   }, [])
 
   async function authenticate(path: '/api/register' | '/api/login') {
@@ -43,7 +63,7 @@ export function Lobby() {
   async function enter(nextCode: string) {
     const displayName = account?.nickname ?? cleanDisplayName(name)
     if (!displayName) {
-      setError('กรอกชื่อที่แสดงก่อนเข้าห้อง สูงสุด 24 ตัวอักษร')
+      setError('กรอกชื่อ')
       return
     }
     setError(null)
@@ -55,7 +75,7 @@ export function Lobby() {
 
   async function createRoom() {
     if (!account) {
-      setError('เข้าสู่ระบบก่อนสร้างห้อง จึงจะเป็นเจ้าของห้อง')
+      setError('เข้าสู่ระบบก่อน')
       return
     }
     setPending('create')
@@ -70,50 +90,38 @@ export function Lobby() {
   }
 
   return (
-    <main data-testid="lobby" className="mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center px-4 py-8 sm:px-8">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <Logo />
-        <p className="rounded-full border border-gold/40 bg-ink/60 px-3 py-1 text-sm text-gold">เจ้าของ: FIBO99</p>
-      </header>
-      <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1.618fr)_minmax(20rem,1fr)]">
-        <section>
-          <figure className="ornament-panel overflow-hidden rounded-[1.4rem]">
+    <main data-testid="lobby" className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-8 sm:py-8">
+      <section className="grid flex-1 items-center gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,26rem)] lg:gap-10">
+        <figure className="ornament-panel relative overflow-hidden rounded-[1.6rem]">
+          <img
+            src="/brand/fibo99-hero.webp"
+            alt="FIBO99"
+            width={960}
+            height={960}
+            className="h-52 w-full object-cover object-[center_16%] sm:h-80 lg:h-[34rem]"
+          />
+          <figcaption className="absolute inset-x-0 bottom-0 flex items-end gap-3 bg-gradient-to-t from-black via-black/75 to-transparent px-4 pt-16 pb-4 sm:px-6 sm:pb-6">
             <img
-              src="/brand/fibo99-hero.webp"
-              alt="มาสคอต FIBO99 ชายชราในชุดคลุมบุกันดี ถือดินสอ fibonacci 0.875"
-              width={960}
-              height={960}
-              className="aspect-[4/3] max-h-72 w-full object-cover object-[center_18%] sm:aspect-square sm:max-h-[28rem] lg:max-h-[34rem]"
+              src="/brand/fibo99-avatar.webp"
+              alt=""
+              width={56}
+              height={56}
+              className="h-12 w-12 rounded-full object-cover shadow-[0_0_0_1px_#1a120b,0_0_0_2px_#d4b36a] sm:h-14 sm:w-14"
             />
-          </figure>
-          <h1 className="font-display mt-5 max-w-xl text-4xl leading-[1.25] font-bold sm:text-5xl">
-            คุยวง
-            <span className="mt-1 block text-gold">by FIBO99</span>
-          </h1>
-          <p className="mt-4 max-w-lg text-base leading-relaxed text-muted-foreground sm:text-lg">
-            ห้องสนทนาสดสำหรับวงเล็ก ๆ ข้อความ เสียง กล้อง และแชร์หน้าจอ ในบรรยากาศเรียบหรูของ FIBO99
-          </p>
-          <ul className="mt-6 space-y-3 text-sm sm:text-base">
-            <li className="flex gap-3">
-              <span className="font-display w-8 shrink-0 text-lg text-gold">01</span>
-              <span>ยศติดกับชื่อบัญชี ออกแล้วเข้าใหม่ก็ยังอยู่</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="font-display w-8 shrink-0 text-lg text-cream">02</span>
-              <span>เจ้าของกับผู้ดูแลเตะ แบน ปิดแชต และล็อกกล้องได้</span>
-            </li>
-            <li className="flex gap-3">
-              <span className="font-display w-8 shrink-0 text-lg text-gold">03</span>
-              <span>ดีเจเปิดเพลงจากเซิร์ฟเวอร์ ให้ทุกคนได้ยินตรงกัน</span>
-            </li>
-          </ul>
-        </section>
+            <div>
+              <h1 className="font-display text-3xl leading-none font-bold text-gold sm:text-5xl">FIBO99</h1>
+              <p className="mt-1 text-xs tracking-[0.28em] text-cream sm:text-sm">คุยวง</p>
+            </div>
+          </figcaption>
+        </figure>
 
         <div className="ornament-panel rounded-[1.6rem] p-5 sm:p-6">
           {account ? (
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl bg-ink px-3 py-2">
-              <p className="text-sm">
-                เข้าสู่ระบบในชื่อ <span data-testid="session-name" className="font-medium text-amber">{account.nickname}</span>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="truncate text-sm">
+                <span data-testid="session-name" className="font-medium text-gold">
+                  {account.nickname}
+                </span>
               </p>
               <Button
                 type="button"
@@ -126,7 +134,7 @@ export function Lobby() {
                   })
                 }}
               >
-                ออกจากบัญชี
+                ออก
               </Button>
             </div>
           ) : (
@@ -137,7 +145,6 @@ export function Lobby() {
                 void authenticate('/api/login')
               }}
             >
-              <p className="text-sm font-medium">บัญชีสำหรับยศและสิทธิ์เจ้าของ</p>
               <Input
                 value={nickname}
                 autoComplete="username"
@@ -150,7 +157,7 @@ export function Lobby() {
                 value={password}
                 type="password"
                 autoComplete="current-password"
-                placeholder="รหัสผ่านอย่างน้อย 8 ตัว"
+                placeholder="รหัสผ่าน"
                 aria-label="รหัสผ่าน"
                 data-testid="account-password"
                 onChange={(event) => setPassword(event.target.value)}
@@ -165,30 +172,24 @@ export function Lobby() {
                   data-testid="register"
                   onClick={() => void authenticate('/api/register')}
                 >
-                  {pending === 'auth' ? 'กำลังบันทึก...' : 'สมัครชื่อ'}
+                  {pending === 'auth' ? '...' : 'สมัคร'}
                 </Button>
               </div>
             </form>
           )}
 
           <Button type="button" size="lg" className="w-full" disabled={pending !== null} data-testid="create-room" onClick={() => void createRoom()}>
-            {pending === 'create' ? 'กำลังเปิดอุปกรณ์...' : 'สร้างห้องใหม่'}
+            {pending === 'create' ? '...' : 'สร้างห้อง'}
           </Button>
-          {!account ? <p className="mt-2 text-xs text-muted-foreground">สร้างห้องได้เมื่อเข้าสู่ระบบแล้วเท่านั้น</p> : null}
-
-          <div className="my-5 flex items-center gap-3 text-xs tracking-wide text-muted-foreground">
-            <span className="gold-rule flex-1" />
-            มีรหัสหรือลิงก์อยู่แล้ว
-            <span className="gold-rule flex-1" />
-          </div>
 
           <form
+            className="mt-4"
             onSubmit={(event) => {
               event.preventDefault()
               if (pending) return
               const nextCode = extractRoomCode(code)
               if (!nextCode) {
-                setError('รหัสห้องต้องเป็นตัวอักษรหรือตัวเลข 4–8 ตัว หรือวางลิงก์ห้อง')
+                setError('รหัสไม่ถูกต้อง')
                 return
               }
               setPending('join')
@@ -196,39 +197,31 @@ export function Lobby() {
             }}
           >
             {!account ? (
-              <>
-                <label htmlFor="display-name" className="text-sm font-medium">
-                  ชื่อที่แสดงสำหรับผู้มาเยือน
-                </label>
-                <Input
-                  id="display-name"
-                  className="mt-2 mb-3"
-                  value={name}
-                  maxLength={24}
-                  autoComplete="nickname"
-                  placeholder="เช่น มิ้นท์"
-                  aria-label="ชื่อที่แสดง"
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </>
+              <Input
+                id="display-name"
+                className="mb-2"
+                value={name}
+                maxLength={24}
+                autoComplete="nickname"
+                placeholder="ชื่อ"
+                aria-label="ชื่อที่แสดง"
+                onChange={(event) => setName(event.target.value)}
+              />
             ) : null}
-            <label htmlFor="room-code" className="text-sm font-medium">
-              รหัสห้องหรือลิงก์
-            </label>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 id="room-code"
                 value={code}
                 autoCapitalize="characters"
                 autoCorrect="off"
                 spellCheck={false}
-                placeholder="เช่น HK4N2P"
+                placeholder="รหัสห้อง"
                 aria-label="รหัสห้องหรือลิงก์"
                 data-testid="join-code"
                 onChange={(event) => setCode(event.target.value)}
               />
               <Button type="submit" variant="secondary" size="lg" className="sm:min-w-28" disabled={pending !== null} data-testid="join-room">
-                {pending === 'join' ? 'กำลังเข้า...' : 'เข้าร่วม'}
+                {pending === 'join' ? '...' : 'เข้าร่วม'}
               </Button>
             </div>
           </form>
@@ -237,17 +230,33 @@ export function Lobby() {
             <p role="alert" className="mt-3 text-sm text-rose">
               {error}
             </p>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">ถ้าไม่ให้ใช้กล้องหรือไมค์ แชตข้อความยังเข้าได้</p>
-          )}
+          ) : null}
+
+          {rooms.length > 0 ? (
+            <ul data-testid="active-rooms" className="mt-5 space-y-2">
+              {rooms.map((room) => (
+                <li key={room.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between rounded-xl border border-gold/25 bg-ink/50 px-3 py-2 text-left text-sm hover:border-gold/60"
+                    onClick={() => {
+                      setCode(room.id)
+                      if (account || cleanDisplayName(name)) void enter(room.id)
+                    }}
+                  >
+                    <span className="font-mono tracking-[0.16em]">{room.id}</span>
+                    <span className="text-gold">{room.people}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
-      </div>
-      <p className="mt-8 text-sm text-muted-foreground">
-        ยศ สีชื่อ และเพลงอยู่ในฐานข้อมูลของเซิร์ฟเวอร์ ข้อความแชตยังอยู่แค่ตอนที่มีคนในห้อง
-      </p>
-      <div className="ornament-panel mt-4 overflow-hidden rounded-[1.2rem]">
-        <FollowLinks className="border-t-0" />
-      </div>
+      </section>
+
+      <footer className="ornament-panel mt-8 overflow-hidden rounded-[1.2rem]">
+        <FollowLinks className="border-t-0 bg-transparent" />
+      </footer>
     </main>
   )
 }
