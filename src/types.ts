@@ -29,6 +29,10 @@ export type Participant = {
   micAllowed: boolean
   camAllowed: boolean
   screenAllowed: boolean
+  handRaised: boolean
+  speaker: boolean
+  speaking: boolean
+  avatarUrl: string | null
 }
 
 export type ChatMessage = {
@@ -41,6 +45,7 @@ export type ChatMessage = {
   rank?: RankId
   rankLabel?: string
   color?: string
+  avatarUrl?: string | null
 }
 
 export type DjTrack = { id: string; title: string; url?: string }
@@ -81,6 +86,7 @@ export type RoomState = {
   rankColors: Record<RankId, string>
   dj: DjState
   ownerSecretEnabled: boolean
+  caps?: { people: number; speakers: number }
 }
 
 export type SignalData = {

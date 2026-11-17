@@ -1,13 +1,16 @@
-import { Mic, MicOff, MonitorUp, Video, VideoOff } from 'lucide-react'
+import { Mic, MicOff, MonitorUp } from 'lucide-react'
+import { AvatarFace } from '@/components/AvatarFace.tsx'
 import { RankBadge } from '@/components/RankBadge.tsx'
 import { safeColor, type Participant } from '@/types.ts'
 
 export function PeoplePanel({
   people,
   selfId,
+  onUploadAvatar,
 }: {
   people: Participant[]
   selfId: string | null
+  onUploadAvatar?: (file: File) => Promise<void>
 }) {
   return (
     <section className="flex h-full min-h-0 flex-col bg-card/30">
@@ -33,13 +36,17 @@ export function PeoplePanel({
                 data-rank={person.rank}
                 data-color={safeColor(person.color)}
                 data-audio={person.audio ? 'true' : 'false'}
-                data-video={person.video ? 'true' : 'false'}
+                data-speaker={person.speaker ? 'true' : 'false'}
                 data-sharing={person.sharing ? 'true' : 'false'}
                 className="flex items-center gap-3 rounded-xl px-2 py-2"
               >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink font-display text-sm">
-                  {[...person.name][0] ?? '?'}
-                </span>
+                <AvatarFace
+                  name={person.name}
+                  color={person.color}
+                  url={person.avatarUrl}
+                  speaking={person.speaking}
+                  className="h-9 w-9 text-sm"
+                />
                 <span className="min-w-0 flex-1 truncate text-sm">
                   <span style={{ color: safeColor(person.color) }}>{person.name}</span>
                   {self ? <span className="ml-2 text-xs text-amber">คุณ</span> : null}
@@ -47,11 +54,24 @@ export function PeoplePanel({
                     <RankBadge rank={person.rank} label={person.rankLabel} />
                   </span>
                 </span>
-                <span className="text-muted-foreground" aria-label={person.audio ? 'ไมค์เปิด' : 'ไมค์ปิด'}>
-                  {person.audio ? <Mic className="size-4 text-teal" /> : <MicOff className="size-4 text-rose" />}
-                </span>
-                <span className="text-muted-foreground" aria-label={person.video ? 'กล้องเปิด' : 'กล้องปิด'}>
-                  {person.video ? <Video className="size-4 text-teal" /> : <VideoOff className="size-4 text-rose" />}
+                {self && person.accountId && onUploadAvatar ? (
+                  <label className="cursor-pointer text-[11px] text-gold underline">
+                    รูป
+                    <input
+                      data-testid="avatar-file"
+                      className="sr-only"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0]
+                        event.target.value = ''
+                        if (file) void onUploadAvatar(file)
+                      }}
+                    />
+                  </label>
+                ) : null}
+                <span className="text-muted-foreground" aria-label={person.speaker && person.audio ? 'ไมค์เปิด' : 'ไมค์ปิด'}>
+                  {person.speaker && person.audio ? <Mic className="size-4 text-teal" /> : <MicOff className="size-4 text-rose" />}
                 </span>
                 {person.sharing ? (
                   <span className="text-amber" aria-label="กำลังแชร์หน้าจอ">

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Send } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
+import { AvatarFace } from '@/components/AvatarFace.tsx'
 import { RankBadge } from '@/components/RankBadge.tsx'
 import { cn, formatTime } from '@/lib/utils.ts'
 import { safeColor, type ChatMessage } from '@/types.ts'
@@ -69,6 +70,7 @@ export function ChatPanel({
                 className={cn('flex max-w-full flex-col', own ? 'items-end' : 'items-start')}
               >
                 <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                  <AvatarFace name={message.name} color={message.color} url={message.avatarUrl} className="h-6 w-6 text-[11px]" />
                   <span className="font-medium" style={{ color: safeColor(message.color) }}>
                     {own ? `${message.name} · คุณ` : message.name}
                   </span>
