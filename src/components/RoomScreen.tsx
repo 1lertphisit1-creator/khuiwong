@@ -65,9 +65,11 @@ export function RoomScreen({
 
   const people = useMemo<Participant[]>(() => {
     return room.participants.map((person) =>
-      person.id === room.selfId ? { ...person, audio: room.audioOn, video: room.videoOn } : person,
+      person.id === room.selfId
+        ? { ...person, audio: room.audioOn, video: room.videoOn, sharing: room.sharing }
+        : person,
     )
-  }, [room.audioOn, room.participants, room.selfId, room.videoOn])
+  }, [room.audioOn, room.participants, room.selfId, room.sharing, room.videoOn])
 
   async function retry() {
     setRetrying(true)
@@ -198,7 +200,9 @@ export function RoomScreen({
             people={people}
             selfId={room.selfId}
             remoteStreams={room.remoteStreams}
+            remoteScreens={room.remoteScreens}
             localStream={stream}
+            localScreen={room.screenStream}
             notice={notice}
           />
           <DjPlayer
@@ -213,13 +217,17 @@ export function RoomScreen({
           <ControlBar
             audioOn={room.audioOn}
             videoOn={room.videoOn}
+            sharing={room.sharing}
             hasAudio={room.hasAudio}
             hasVideo={room.hasVideo}
             micAllowed={room.self.micAllowed}
             camAllowed={room.self.camAllowed}
+            screenAllowed={room.self.screenAllowed}
             disabled={room.status !== 'connected' || retrying}
+            screenNotice={room.screenNotice}
             onToggleAudio={room.toggleAudio}
             onToggleVideo={room.toggleVideo}
+            onToggleScreen={() => void room.toggleScreen()}
             onRetry={() => void retry()}
           />
         </section>

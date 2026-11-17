@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
+import { captureScreen, stopStream, whenTrackEnds } from '../lib/media.ts'
 import { Mesh } from '../lib/mesh.ts'
 import { sessionToken } from '../lib/session.ts'
 import type {
@@ -34,6 +35,7 @@ const emptySelf: SelfProfile = {
   textMuted: false,
   micAllowed: true,
   camAllowed: true,
+  screenAllowed: true,
 }
 
 const emptyDj: DjState = {
@@ -62,7 +64,11 @@ export function useRoom({
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({})
   const [self, setSelf] = useState<SelfProfile>(emptySelf)
-  const [policy, setPolicy] = useState<RoomPolicy>({ micMinRank: 'guest', camMinRank: 'guest' })
+  const [policy, setPolicy] = useState<RoomPolicy>({ micMinRank: 'guest', camMinRank: 'guest', screenMinRank: 'member' })
+  const [remoteScreens, setRemoteScreens] = useState<Record<string, MediaStream>>({})
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [screenNotice, setScreenNotice] = useState<string | null>(null)
   const [rankColors, setRankColors] = useState<Partial<Record<RankId, string>>>({})
   const [dj, setDj] = useState<DjState>(emptyDj)
   const [ownerSecretEnabled, setOwnerSecretEnabled] = useState(false)
@@ -81,8 +87,25 @@ export function useRoom({
   const socketRef = useRef<Socket | null>(null)
   const meshRef = useRef<Mesh | null>(null)
   const streamRef = useRef(localStream)
+  const screenRef = useRef<MediaStream | null>(null)
+  const sharingRef = useRef(false)
+  const releaseRef = useRef<(notify: boolean) => void>(() => {})
   const flagsRef = useRef({ audio: audioOn, video: videoOn })
   const selfIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    releaseRef.current = (notify: boolean) => {
+      const current = screenRef.current
+      if (!current && !sharingRef.current) return
+      screenRef.current = null
+      sharingRef.current = false
+      setScreenStream(null)
+      setSharing(false)
+      stopStream(current)
+      void meshRef.current?.setScreen(null)
+      if (notify && socketRef.current?.connected) socketRef.current.emit('screen-state', { sharing: false })
+    }
+  })
 
   useEffect(() => {
     streamRef.current = localStream
@@ -134,21 +157,45 @@ export function useRoom({
 
         const resetMesh = (id: string) => {
           meshRef.current?.close()
-          meshRef.current = new Mesh(socket!, id, iceServers, () => streamRef.current, (peerId, stream) => {
-            setRemoteStreams((current) => {
-              if (!stream) {
-                if (!(peerId in current)) return current
-                const next = { ...current }
-                delete next[peerId]
-                return next
-              }
-              if (current[peerId] === stream) return current
-              return { ...current, [peerId]: stream }
-            })
-          })
+          meshRef.current = new Mesh(
+            socket!,
+            id,
+            iceServers,
+            () => streamRef.current,
+            () => screenRef.current,
+            (peerId, stream) => {
+              setRemoteStreams((current) => {
+                if (!stream) {
+                  if (!(peerId in current)) return current
+                  const next = { ...current }
+                  delete next[peerId]
+                  return next
+                }
+                if (current[peerId] === stream) return current
+                return { ...current, [peerId]: stream }
+              })
+            },
+            (peerId, stream) => {
+              setRemoteScreens((current) => {
+                if (!stream) {
+                  if (!(peerId in current)) return current
+                  const next = { ...current }
+                  delete next[peerId]
+                  return next
+                }
+                if (current[peerId] === stream) return current
+                return { ...current, [peerId]: stream }
+              })
+            },
+          )
         }
 
-        const applyControl = (payload: { micAllowed: boolean; camAllowed: boolean; textMuted: boolean }) => {
+        const applyControl = (payload: {
+          micAllowed: boolean
+          camAllowed: boolean
+          screenAllowed: boolean
+          textMuted: boolean
+        }) => {
           setSelf((current) => ({ ...current, ...payload }))
           if (!payload.micAllowed) {
             streamRef.current?.getAudioTracks().forEach((track) => {
@@ -162,6 +209,7 @@ export function useRoom({
             })
             setVideoOverride(false)
           }
+          if (!payload.screenAllowed) releaseRef.current(false)
         }
 
         socket.on('connect', () => {
@@ -182,6 +230,7 @@ export function useRoom({
           meshRef.current?.close()
           meshRef.current = null
           setRemoteStreams({})
+          setRemoteScreens({})
         })
 
         socket.on('connect_error', () => {
@@ -219,6 +268,7 @@ export function useRoom({
           setStatus('connected')
           applyControl(payload.self)
           resetMesh(payload.selfId)
+          if (screenRef.current) socket?.emit('screen-state', { sharing: true })
           const others = payload.participants.filter((person) => person.id !== payload.selfId)
           void (async () => {
             for (const person of others) {
@@ -247,11 +297,13 @@ export function useRoom({
               textMuted: person.textMuted,
               micAllowed: person.micAllowed,
               camAllowed: person.camAllowed,
+              screenAllowed: person.screenAllowed,
               permissions: permissionsForRank(person.rank),
             }))
             applyControl({
               micAllowed: person.micAllowed,
               camAllowed: person.camAllowed,
+              screenAllowed: person.screenAllowed,
               textMuted: person.textMuted,
             })
           }
@@ -268,6 +320,11 @@ export function useRoom({
           setParticipants((current) => current.map((person) => (person.id === id ? { ...person, audio, video } : person)))
         })
 
+        socket.on('screen-state', ({ id, sharing: next }: { id: string; sharing: boolean }) => {
+          setParticipants((current) => current.map((person) => (person.id === id ? { ...person, sharing: next } : person)))
+          if (id === selfIdRef.current && !next && screenRef.current) releaseRef.current(false)
+        })
+
         socket.on('media-control', applyControl)
         socket.on('policy', (next: RoomPolicy) => setPolicy(next))
         socket.on('rank-colors', (colors: Partial<Record<RankId, string>>) => setRankColors(colors))
@@ -282,6 +339,9 @@ export function useRoom({
     return () => {
       stopped = true
       window.clearTimeout(timer)
+      stopStream(screenRef.current)
+      screenRef.current = null
+      sharingRef.current = false
       meshRef.current?.close()
       meshRef.current = null
       socket?.disconnect()
@@ -314,6 +374,36 @@ export function useRoom({
     return true
   }
 
+  async function toggleScreen() {
+    if (!self.screenAllowed && !screenRef.current) {
+      setScreenNotice('ยศนี้แชร์หน้าจอไม่ได้')
+      return false
+    }
+    if (screenRef.current) {
+      releaseRef.current(true)
+      return true
+    }
+    const result = await captureScreen()
+    if (!result.stream) {
+      if (result.warning) setScreenNotice(result.warning)
+      return false
+    }
+    const video = result.stream.getVideoTracks()[0]
+    if (video) {
+      whenTrackEnds(video, () => {
+        if (screenRef.current?.getVideoTracks().some((track) => track.id === video.id)) releaseRef.current(true)
+      })
+    }
+    screenRef.current = result.stream
+    sharingRef.current = true
+    setScreenStream(result.stream)
+    setSharing(true)
+    setScreenNotice(null)
+    socketRef.current?.emit('screen-state', { sharing: true })
+    await meshRef.current?.setScreen(result.stream)
+    return true
+  }
+
   function sendChat(text: string) {
     const trimmed = text.trim()
     if (!trimmed || self.textMuted || !socketRef.current?.connected) return false
@@ -341,10 +431,16 @@ export function useRoom({
     ownerSecretEnabled,
     audioOn,
     videoOn,
+    sharing,
+    screenStream,
+    remoteScreens,
+    screenNotice,
+    clearScreenNotice: () => setScreenNotice(null),
     hasAudio: (localStream?.getAudioTracks().length ?? 0) > 0,
     hasVideo: (localStream?.getVideoTracks().length ?? 0) > 0,
     toggleAudio,
     toggleVideo,
+    toggleScreen,
     sendChat,
     send,
   }

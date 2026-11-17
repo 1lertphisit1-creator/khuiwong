@@ -19,6 +19,8 @@ export default defineConfig({
       args: [
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
+        '--auto-select-desktop-capture-source=Entire screen',
+        '--enable-usermedia-screen-capturing',
         '--autoplay-policy=no-user-gesture-required',
         '--disable-dev-shm-usage',
       ],
