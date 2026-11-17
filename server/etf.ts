@@ -39,10 +39,13 @@ const SKIP = new Set(['fee', 'total', 'average', 'maximum', 'minimum', ''])
 export class EtfFeed {
   board: EtfBoard | null = null
   private timer: ReturnType<typeof setInterval> | null = null
+  private repriceTimer: ReturnType<typeof setInterval> | null = null
   private onBoard: (board: EtfBoard) => void
+  private livePrice: (asset: 'BTC' | 'ETH') => number | null
 
-  constructor(onBoard: (board: EtfBoard) => void) {
+  constructor(onBoard: (board: EtfBoard) => void, livePrice?: (asset: 'BTC' | 'ETH') => number | null) {
     this.onBoard = onBoard
+    this.livePrice = livePrice ?? (() => null)
     const cached = readCache(CACHE_KEY)
     if (cached) {
       try {
@@ -57,18 +60,20 @@ export class EtfFeed {
   start() {
     void this.refresh()
     this.timer = setInterval(() => void this.refresh(), 45 * 60 * 1000)
+    this.repriceTimer = setInterval(() => void this.fillPrices(), 20_000)
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer)
+    if (this.repriceTimer) clearInterval(this.repriceTimer)
   }
 
   async refresh() {
     try {
       const [btcRaw, ethRaw] = await Promise.all([this.loadAsset('BTC'), this.loadAsset('ETH')])
       const [btc, eth] = await Promise.all([
-        btcRaw.asset ? priceAsset(btcRaw.asset).then((asset) => ({ ...btcRaw, asset })) : Promise.resolve(btcRaw),
-        ethRaw.asset ? priceAsset(ethRaw.asset).then((asset) => ({ ...ethRaw, asset })) : Promise.resolve(ethRaw),
+        btcRaw.asset ? this.priced(btcRaw.asset).then((asset) => ({ ...btcRaw, asset })) : Promise.resolve(btcRaw),
+        ethRaw.asset ? this.priced(ethRaw.asset).then((asset) => ({ ...ethRaw, asset })) : Promise.resolve(ethRaw),
       ])
       if (!btc.asset && !eth.asset) throw new Error('empty')
       const source = btc.source === 'farside' || eth.source === 'farside' ? 'farside' : 'farside-archive'
@@ -84,7 +89,9 @@ export class EtfFeed {
       this.board = board
       writeCache(CACHE_KEY, JSON.stringify(board), board.updatedAt)
       this.onBoard(board)
-      console.log(`[etf] ${source} btc=${board.btc?.date ?? '-'} eth=${board.eth?.date ?? '-'}`)
+      console.log(
+        `[etf] ${source} btc=${board.btc?.date ?? '-'} ${board.btc?.totalCoin ?? 'no-price'} eth=${board.eth?.date ?? '-'} ${board.eth?.totalCoin ?? 'no-price'}`,
+      )
     } catch (error) {
       console.warn('[etf] refresh failed', error instanceof Error ? error.message : error)
       if (this.board) {
@@ -103,6 +110,29 @@ export class EtfFeed {
     const archived = await fetchArchive(page.live)
     const archivedAsset = archived ? parseAsset(asset, archived) : null
     return { asset: archivedAsset, source: 'farside-archive' as const }
+  }
+
+  private priced(asset: EtfAsset) {
+    return priceAsset(asset, this.livePrice(asset.asset))
+  }
+
+  private async fillPrices() {
+    const board = this.board
+    if (!board) return
+    const missing = [board.btc, board.eth].some((asset) => asset && asset.totalCoin == null)
+    if (!missing) return
+    try {
+      const btc = board.btc ? await this.priced(board.btc) : null
+      const eth = board.eth ? await this.priced(board.eth) : null
+      if (btc?.totalCoin == null && eth?.totalCoin == null) return
+      const next: EtfBoard = { ...board, btc, eth, updatedAt: Date.now() }
+      this.board = next
+      writeCache(CACHE_KEY, JSON.stringify(next), next.updatedAt)
+      this.onBoard(next)
+      console.log(`[etf] repriced btc=${btc?.totalCoin ?? '-'} eth=${eth?.totalCoin ?? '-'}`)
+    } catch (error) {
+      console.warn('[etf] reprice failed', error instanceof Error ? error.message : error)
+    }
   }
 }
 
@@ -187,13 +217,13 @@ export function parseAsset(asset: 'BTC' | 'ETH', html: string): EtfAsset | null 
 
 const KLINE_HOSTS = ['https://data-api.binance.vision', 'https://api.binance.com']
 
-async function priceAsset(asset: EtfAsset): Promise<EtfAsset> {
+async function priceAsset(asset: EtfAsset, liveFallback: number | null): Promise<EtfAsset> {
   const symbol = asset.asset === 'BTC' ? 'BTCUSDT' : 'ETHUSDT'
   const dates = asset.history.map((day) => day.date)
   const closes = await dailyCloses(symbol, dates)
   const missing = dates.some((date) => !closes.has(date))
-  const spot = missing ? await spotPrice(symbol) : null
-  const latestPrice = closes.get(asset.date) ?? spot
+  const spot = missing ? (await spotPrice(symbol)) ?? liveFallback : null
+  const latestPrice = closes.get(asset.date) ?? spot ?? liveFallback
   const priceBasis = closes.has(asset.date) ? 'close' : spot ? 'live' : null
   const funds = asset.funds.map((fund) => ({
     ...fund,
@@ -228,10 +258,13 @@ async function dailyCloses(symbol: string, dates: string[]) {
   for (const host of KLINE_HOSTS) {
     try {
       const response = await fetch(
-        `${host}/api/v3/klines?symbol=${symbol}&interval=1d&startTime=${start}&endTime=${end}&limit=30`,
-        { headers: { Accept: 'application/json', 'User-Agent': USER_AGENT } },
+        `${host}/api/v3/klines?symbol=${symbol}&interval=1d&startTime=${start}&endTime=${end + 86_400_000}&limit=30`,
+        { headers: { Accept: 'application/json' } },
       )
-      if (!response.ok) continue
+      if (!response.ok) {
+        console.warn(`[etf] kline ${host} ${symbol} ${response.status}`)
+        continue
+      }
       const rows = (await response.json()) as unknown
       if (!Array.isArray(rows)) continue
       for (const row of rows) {
@@ -253,9 +286,12 @@ async function spotPrice(symbol: string) {
   for (const host of KLINE_HOSTS) {
     try {
       const response = await fetch(`${host}/api/v3/ticker/price?symbol=${symbol}`, {
-        headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
+        headers: { Accept: 'application/json' },
       })
-      if (!response.ok) continue
+      if (!response.ok) {
+        console.warn(`[etf] spot ${host} ${symbol} ${response.status}`)
+        continue
+      }
       const body = (await response.json()) as { price?: string }
       const price = Number(body.price)
       if (price > 0) return price
