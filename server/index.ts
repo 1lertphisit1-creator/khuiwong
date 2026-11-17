@@ -18,6 +18,7 @@ import {
   nicknameKey,
   registerAccount,
 } from './auth.ts'
+import { PriceFeed, type PriceBoard } from './prices.ts'
 import {
   addBan,
   countDjTracks,
@@ -219,6 +220,7 @@ type ServerToClient = {
   'mic-end': (payload: { id: string; gen: number }) => void
   'screen-chunk': (payload: { id: string; gen: number; seq: number; mime: string; chunk: Buffer }) => void
   'screen-end': (payload: { id: string; gen: number }) => void
+  prices: (payload: PriceBoard) => void
   'participant-joined': (participant: PublicParticipant) => void
   'participant-left': (payload: { id: string }) => void
   'participant-updated': (participant: PublicParticipant) => void
@@ -689,6 +691,20 @@ async function main() {
   app.get('/api/health', health)
   app.get('/health', health)
 
+  const prices = new PriceFeed((board) => {
+    io.emit('prices', board)
+  })
+  prices.start()
+
+  app.get('/api/prices', (_req, res) => {
+    const board = prices.snapshot()
+    if (!board) {
+      res.status(503).json({ message: 'ยังไม่มีราคา' })
+      return
+    }
+    res.json(board)
+  })
+
   app.get('/api/config', (_req, res) => {
     res.json({
       iceServers: buildIceServers(),
@@ -841,6 +857,8 @@ async function main() {
   })
 
   io.on('connection', (socket) => {
+    const board = prices.snapshot()
+    if (board) socket.emit('prices', board)
     socket.on('join', (payload) => {
       const roomId = cleanRoomId(payload?.roomId)
       const account = accountFromToken(payload?.token)

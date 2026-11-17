@@ -116,6 +116,19 @@ select {
   animation: khui-marquee 12s linear infinite;
 }
 
+@keyframes price-flash {
+  0% {
+    background-color: rgba(224, 193, 122, 0.55);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.price-flash {
+  animation: price-flash 0.7s ease;
+}
+
 .gold-rule {
   height: 1px;
   border: 0;
