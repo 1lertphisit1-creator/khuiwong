@@ -71,12 +71,15 @@ type PublicParticipant = {
   color: string
   audio: boolean
   video: boolean
+  sharing: boolean
   textMuted: boolean
   micMuted: boolean
   micBlocked: boolean
   camBlocked: boolean
+  screenBlocked: boolean
   micAllowed: boolean
   camAllowed: boolean
+  screenAllowed: boolean
 }
 
 type ChatMessage = {
@@ -101,15 +104,17 @@ type LiveUser = {
   micMuted: boolean
   micBlocked: boolean
   camBlocked: boolean
+  screenBlocked: boolean
   guestKey: string | null
   audio: boolean
   video: boolean
+  sharing: boolean
 }
 
 type LiveRoom = {
   participants: Map<string, LiveUser>
   messages: ChatMessage[]
-  policy: { micMinRank: RankId; camMinRank: RankId }
+  policy: { micMinRank: RankId; camMinRank: RankId; screenMinRank: RankId }
   rankColors: Record<RankId, string>
 }
 
@@ -138,13 +143,14 @@ type ClientToServer = {
   chat: (payload: { text?: string }) => void
   signal: (payload: { to?: string; data?: SignalData }) => void
   'media-state': (payload: { audio?: boolean; video?: boolean }) => void
+  'screen-state': (payload: { sharing?: boolean }) => void
   'mod-rank': (payload: { accountId?: string; rank?: string }) => void
   'mod-color': (payload: { accountId?: string; color?: string | null }) => void
   'mod-rank-color': (payload: { rank?: string; color?: string }) => void
   'mod-flag': (payload: { accountId?: string; flag?: string; value?: boolean }) => void
   'mod-kick': (payload: { socketId?: string }) => void
   'mod-ban': (payload: { socketId?: string }) => void
-  'mod-policy': (payload: { micMinRank?: string; camMinRank?: string }) => void
+  'mod-policy': (payload: { micMinRank?: string; camMinRank?: string; screenMinRank?: string }) => void
   'claim-owner': (payload: { secret?: string }) => void
   'dj-play': (payload: { trackId?: string }) => void
   'dj-pause': () => void
@@ -166,8 +172,9 @@ type ServerToClient = {
       textMuted: boolean
       micAllowed: boolean
       camAllowed: boolean
+      screenAllowed: boolean
     }
-    policy: { micMinRank: RankId; camMinRank: RankId }
+    policy: { micMinRank: RankId; camMinRank: RankId; screenMinRank: RankId }
     rankColors: Record<RankId, string>
     dj: DjSnapshot
     ownerSecretEnabled: boolean
@@ -177,8 +184,9 @@ type ServerToClient = {
   'participant-updated': (participant: PublicParticipant) => void
   'chat-message': (message: ChatMessage) => void
   'media-state': (payload: { id: string; audio: boolean; video: boolean }) => void
-  'media-control': (payload: { micAllowed: boolean; camAllowed: boolean; textMuted: boolean }) => void
-  policy: (payload: { micMinRank: RankId; camMinRank: RankId }) => void
+  'screen-state': (payload: { id: string; sharing: boolean }) => void
+  'media-control': (payload: { micAllowed: boolean; camAllowed: boolean; screenAllowed: boolean; textMuted: boolean }) => void
+  policy: (payload: { micMinRank: RankId; camMinRank: RankId; screenMinRank: RankId }) => void
   'rank-colors': (payload: Record<RankId, string>) => void
   'dj-state': (payload: DjSnapshot) => void
   signal: (payload: { from: string; data: SignalData }) => void
@@ -323,10 +331,11 @@ function openLive(roomId: string) {
   if (!row) return null
   const micMinRank = isRankId(row.mic_min_rank) ? row.mic_min_rank : 'guest'
   const camMinRank = isRankId(row.cam_min_rank) ? row.cam_min_rank : 'guest'
+  const screenMinRank = isRankId(row.screen_min_rank) ? row.screen_min_rank : 'member'
   const live: LiveRoom = {
     participants: new Map(),
     messages: [],
-    policy: { micMinRank, camMinRank },
+    policy: { micMinRank, camMinRank, screenMinRank },
     rankColors: getRankColors(roomId),
   }
   rooms.set(roomId, live)
@@ -343,6 +352,17 @@ function canUseCam(live: LiveRoom, user: LiveUser) {
   return rankLevel(user.rank) >= rankLevel(live.policy.camMinRank)
 }
 
+function canShare(live: LiveRoom, user: LiveUser) {
+  if (user.screenBlocked) return false
+  return rankLevel(user.rank) >= rankLevel(live.policy.screenMinRank)
+}
+
+function enforceMedia(live: LiveRoom, user: LiveUser) {
+  if (!canUseMic(live, user)) user.audio = false
+  if (!canUseCam(live, user)) user.video = false
+  if (!canShare(live, user)) user.sharing = false
+}
+
 function toPublic(live: LiveRoom, user: LiveUser): PublicParticipant {
   return {
     id: user.socketId,
@@ -354,12 +374,15 @@ function toPublic(live: LiveRoom, user: LiveUser): PublicParticipant {
     color: user.nameColor ?? live.rankColors[user.rank],
     audio: user.audio && canUseMic(live, user),
     video: user.video && canUseCam(live, user),
+    sharing: user.sharing && canShare(live, user),
     textMuted: user.textMuted,
     micMuted: user.micMuted,
     micBlocked: user.micBlocked,
     camBlocked: user.camBlocked,
+    screenBlocked: user.screenBlocked,
     micAllowed: canUseMic(live, user),
     camAllowed: canUseCam(live, user),
+    screenAllowed: canShare(live, user),
   }
 }
 
@@ -394,17 +417,23 @@ function pushMessage(io: AppServer, roomId: string, live: LiveRoom, message: Cha
 }
 
 function broadcastUser(io: AppServer, roomId: string, live: LiveRoom, user: LiveUser) {
+  enforceMedia(live, user)
   const participant = toPublic(live, user)
   io.to(roomId).emit('participant-updated', participant)
   io.to(user.socketId).emit('media-control', {
     micAllowed: participant.micAllowed,
     camAllowed: participant.camAllowed,
+    screenAllowed: participant.screenAllowed,
     textMuted: participant.textMuted,
   })
   io.to(roomId).emit('media-state', {
     id: user.socketId,
     audio: participant.audio,
     video: participant.video,
+  })
+  io.to(roomId).emit('screen-state', {
+    id: user.socketId,
+    sharing: participant.sharing,
   })
 }
 
@@ -419,8 +448,10 @@ function syncAccountUser(roomId: string, user: LiveUser) {
   user.micMuted = member.mic_muted === 1
   user.micBlocked = member.mic_blocked === 1
   user.camBlocked = member.cam_blocked === 1
+  user.screenBlocked = member.screen_blocked === 1
   if (!canUseMicFrom(user, roomId)) user.audio = false
   if (user.camBlocked) user.video = false
+  if (user.screenBlocked) user.sharing = false
 }
 
 function canUseMicFrom(user: LiveUser, roomId: string) {
@@ -436,6 +467,7 @@ function reloadRoomPolicy(roomId: string) {
   live.policy = {
     micMinRank: isRankId(row.mic_min_rank) ? row.mic_min_rank : 'guest',
     camMinRank: isRankId(row.cam_min_rank) ? row.cam_min_rank : 'guest',
+    screenMinRank: isRankId(row.screen_min_rank) ? row.screen_min_rank : 'member',
   }
   live.rankColors = getRankColors(roomId)
 }
@@ -539,6 +571,7 @@ function roomStatePayload(socket: AppSocket, roomId: string, live: LiveRoom, use
       textMuted: self.textMuted,
       micAllowed: self.micAllowed,
       camAllowed: self.camAllowed,
+      screenAllowed: self.screenAllowed,
     },
     policy: live.policy,
     rankColors: live.rankColors,
@@ -738,6 +771,7 @@ async function main() {
       let micMuted = false
       let micBlocked = false
       let camBlocked = false
+      let screenBlocked = false
       if (account && roomRow) {
         let member = getMember(roomId, account.id)
         if (!member) {
@@ -751,6 +785,7 @@ async function main() {
             mic_muted: 0,
             mic_blocked: 0,
             cam_blocked: 0,
+            screen_blocked: 0,
           }
           upsertMember(member)
         }
@@ -760,6 +795,7 @@ async function main() {
         micMuted = member.mic_muted === 1
         micBlocked = member.mic_blocked === 1
         camBlocked = member.cam_blocked === 1
+        screenBlocked = member.screen_blocked === 1
       }
 
       const user: LiveUser = {
@@ -772,12 +808,13 @@ async function main() {
         micMuted,
         micBlocked,
         camBlocked,
+        screenBlocked,
         guestKey,
         audio: Boolean(payload?.audio),
         video: Boolean(payload?.video),
+        sharing: false,
       }
-      if (!canUseMic(live, user)) user.audio = false
-      if (!canUseCam(live, user)) user.video = false
+      enforceMedia(live, user)
       live.participants.set(socket.id, user)
       socket.data.roomId = roomId
       socket.data.name = name
@@ -838,6 +875,38 @@ async function main() {
         socket.emit('media-control', {
           micAllowed: view.micAllowed,
           camAllowed: view.camAllowed,
+          screenAllowed: view.screenAllowed,
+          textMuted: view.textMuted,
+        })
+      }
+    })
+
+    socket.on('screen-state', (payload) => {
+      const context = actorContext(socket)
+      if (!context) return
+      const want = Boolean(payload?.sharing) && canShare(context.live, context.user)
+      const was = context.user.sharing
+      context.user.sharing = want
+      const view = toPublic(context.live, context.user)
+      io.to(context.roomId).emit('screen-state', { id: socket.id, sharing: view.sharing })
+      io.to(context.roomId).emit('participant-updated', view)
+      if (want !== was) {
+        pushMessage(
+          io,
+          context.roomId,
+          context.live,
+          makeMessage(
+            'system',
+            want ? `${context.user.name} เริ่มแชร์หน้าจอ` : `${context.user.name} หยุดแชร์หน้าจอ`,
+            context.user.name,
+          ),
+        )
+      }
+      if (Boolean(payload?.sharing) !== view.sharing) {
+        socket.emit('media-control', {
+          micAllowed: view.micAllowed,
+          camAllowed: view.camAllowed,
+          screenAllowed: view.screenAllowed,
           textMuted: view.textMuted,
         })
       }
@@ -933,7 +1002,15 @@ async function main() {
         return
       }
       const flag = payload?.flag
-      if (flag !== 'textMuted' && flag !== 'micMuted' && flag !== 'micBlocked' && flag !== 'camBlocked') return
+      if (
+        flag !== 'textMuted' &&
+        flag !== 'micMuted' &&
+        flag !== 'micBlocked' &&
+        flag !== 'camBlocked' &&
+        flag !== 'screenBlocked'
+      ) {
+        return
+      }
       const target = [...context.live.participants.values()].find((person) => person.accountId === payload?.accountId)
       if (!target || !outranks(context.user.rank, target.rank)) {
         socket.emit('mod-error', { message: 'สั่งคนนี้ไม่ได้' })
@@ -953,31 +1030,29 @@ async function main() {
         target.camBlocked = value
         if (value) target.video = false
       }
+      if (flag === 'screenBlocked') {
+        target.screenBlocked = value
+        if (value) target.sharing = false
+      }
       if (target.accountId) {
         updateMemberFlags(context.roomId, target.accountId, {
           text_muted: target.textMuted ? 1 : 0,
           mic_muted: target.micMuted ? 1 : 0,
           mic_blocked: target.micBlocked ? 1 : 0,
           cam_blocked: target.camBlocked ? 1 : 0,
+          screen_blocked: target.screenBlocked ? 1 : 0,
         })
       }
       broadcastUser(io, context.roomId, context.live, target)
-      const label =
-        flag === 'textMuted'
-          ? value
-            ? 'ปิดแชต'
-            : 'เปิดแชต'
-          : flag === 'micMuted'
-            ? value
-              ? 'ปิดไมค์'
-              : 'เปิดไมค์'
-            : flag === 'micBlocked'
-              ? value
-                ? 'ห้ามเปิดไมค์'
-                : 'อนุญาตไมค์'
-              : value
-                ? 'ห้ามเปิดกล้อง'
-                : 'อนุญาตกล้อง'
+      const flagLabels: Record<string, [string, string]> = {
+        textMuted: ['ปิดแชต', 'เปิดแชต'],
+        micMuted: ['ปิดไมค์', 'เปิดไมค์'],
+        micBlocked: ['ห้ามเปิดไมค์', 'อนุญาตไมค์'],
+        camBlocked: ['ห้ามเปิดกล้อง', 'อนุญาตกล้อง'],
+        screenBlocked: ['ห้ามแชร์จอ', 'อนุญาตแชร์จอ'],
+      }
+      const pair = flagLabels[flag] ?? ['อัปเดต', 'อัปเดต']
+      const label = value ? pair[0] : pair[1]
       pushMessage(
         io,
         context.roomId,
@@ -1044,13 +1119,12 @@ async function main() {
         socket.emit('mod-error', { message: 'คุณไม่มีสิทธิ์ตั้งกฎอุปกรณ์' })
         return
       }
-      if (!isRankId(payload?.micMinRank) || !isRankId(payload?.camMinRank)) return
-      setRoomPolicy(context.roomId, payload.micMinRank, payload.camMinRank)
+      if (!isRankId(payload?.micMinRank) || !isRankId(payload?.camMinRank) || !isRankId(payload?.screenMinRank)) return
+      setRoomPolicy(context.roomId, payload.micMinRank, payload.camMinRank, payload.screenMinRank)
       reloadRoomPolicy(context.roomId)
       io.to(context.roomId).emit('policy', context.live.policy)
       for (const person of context.live.participants.values()) {
-        if (!canUseMic(context.live, person)) person.audio = false
-        if (!canUseCam(context.live, person)) person.video = false
+        enforceMedia(context.live, person)
         broadcastUser(io, context.roomId, context.live, person)
       }
       pushMessage(
@@ -1059,7 +1133,7 @@ async function main() {
         context.live,
         makeMessage(
           'system',
-          `ปรับสิทธิ์อุปกรณ์: ไมค์ตั้งแต่ยศ${rankLabel(payload.micMinRank)} กล้องตั้งแต่ยศ${rankLabel(payload.camMinRank)}`,
+          `ปรับสิทธิ์อุปกรณ์: ไมค์ตั้งแต่ยศ${rankLabel(payload.micMinRank)} กล้องตั้งแต่ยศ${rankLabel(payload.camMinRank)} แชร์จอตั้งแต่ยศ${rankLabel(payload.screenMinRank)}`,
           context.user.name,
         ),
       )
@@ -1096,6 +1170,7 @@ async function main() {
           mic_muted: 0,
           mic_blocked: 0,
           cam_blocked: 0,
+          screen_blocked: 0,
         })
       }
       for (const person of context.live.participants.values()) {

@@ -20,12 +20,15 @@ export type Participant = {
   color: string
   audio: boolean
   video: boolean
+  sharing: boolean
   textMuted: boolean
   micMuted: boolean
   micBlocked: boolean
   camBlocked: boolean
+  screenBlocked: boolean
   micAllowed: boolean
   camAllowed: boolean
+  screenAllowed: boolean
 }
 
 export type ChatMessage = {
@@ -54,6 +57,7 @@ export type DjState = {
 export type RoomPolicy = {
   micMinRank: RankId
   camMinRank: RankId
+  screenMinRank: RankId
 }
 
 export type SelfProfile = {
@@ -64,6 +68,7 @@ export type SelfProfile = {
   textMuted: boolean
   micAllowed: boolean
   camAllowed: boolean
+  screenAllowed: boolean
 }
 
 export type RoomState = {

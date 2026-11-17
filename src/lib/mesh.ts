@@ -7,6 +7,8 @@ type Peer = {
   makingOffer: boolean
   renegotiate: boolean
   ignoreOffer: boolean
+  screenVideo?: RTCRtpSender
+  screenAudio?: RTCRtpSender
 }
 
 const DEFAULT_ICE: RTCIceServer[] = [
@@ -15,25 +17,32 @@ const DEFAULT_ICE: RTCIceServer[] = [
 
 export class Mesh {
   private peers = new Map<string, Peer>()
+  private screenBundles = new Map<string, MediaStream>()
   private closed = false
   private readonly socket: Socket
   private readonly selfId: string
   private readonly iceServers: RTCIceServer[]
   private readonly getLocalStream: () => MediaStream | null
+  private readonly getScreenStream: () => MediaStream | null
   private readonly onStream: (id: string, stream: MediaStream | null) => void
+  private readonly onScreen: (id: string, stream: MediaStream | null) => void
 
   constructor(
     socket: Socket,
     selfId: string,
     iceServers: RTCIceServer[],
     getLocalStream: () => MediaStream | null,
+    getScreenStream: () => MediaStream | null,
     onStream: (id: string, stream: MediaStream | null) => void,
+    onScreen: (id: string, stream: MediaStream | null) => void,
   ) {
     this.socket = socket
     this.selfId = selfId
     this.iceServers = iceServers
     this.getLocalStream = getLocalStream
+    this.getScreenStream = getScreenStream
     this.onStream = onStream
+    this.onScreen = onScreen
   }
 
   static fallbackIce() {
@@ -54,7 +63,19 @@ export class Mesh {
     peer.pc.onsignalingstatechange = null
     peer.pc.close()
     this.peers.delete(id)
+    this.screenBundles.delete(id)
     this.onStream(id, null)
+    this.onScreen(id, null)
+  }
+
+  async setScreen(stream: MediaStream | null) {
+    if (this.closed) return
+    for (const id of [...this.peers.keys()]) {
+      const peer = this.peers.get(id)
+      if (!peer) continue
+      await this.syncScreen(peer, stream)
+      await this.offer(id)
+    }
   }
 
   async connectTo(id: string) {
@@ -147,6 +168,7 @@ export class Mesh {
     this.peers.set(id, peer)
     const stream = this.getLocalStream()
     this.bindLocalMedia(pc, stream)
+    this.attachScreen(peer, this.getScreenStream())
 
     pc.onicecandidate = (event) => {
       if (!event.candidate || this.closed) return
@@ -157,8 +179,18 @@ export class Mesh {
     }
 
     pc.ontrack = (event) => {
+      const track = event.track
       const [remote] = event.streams
-      if (remote) this.onStream(id, remote)
+      const inbound = remote ?? new MediaStream([track])
+      const index = pc
+        .getTransceivers()
+        .filter((item) => item.receiver.track?.kind === track.kind)
+        .findIndex((item) => item === event.transceiver)
+      if (index <= 0) {
+        this.onStream(id, inbound)
+        return
+      }
+      this.absorbScreenTrack(id, track)
     }
 
     pc.onsignalingstatechange = () => {
@@ -184,11 +216,88 @@ export class Mesh {
     else pc.addTransceiver('video', { direction: 'recvonly' })
   }
 
+  private attachScreen(peer: Peer, stream: MediaStream | null) {
+    const video = stream?.getVideoTracks().find((track) => track.readyState === 'live') ?? null
+    const audio = stream?.getAudioTracks().find((track) => track.readyState === 'live') ?? null
+    if (video && stream && !peer.screenVideo) {
+      peer.screenVideo = peer.pc.addTrack(video, stream)
+      void this.preferScreenQuality(peer.screenVideo)
+    }
+    if (audio && stream && !peer.screenAudio) peer.screenAudio = peer.pc.addTrack(audio, stream)
+  }
+
+  private async syncScreen(peer: Peer, stream: MediaStream | null) {
+    const video = stream?.getVideoTracks().find((track) => track.readyState === 'live') ?? null
+    const audio = stream?.getAudioTracks().find((track) => track.readyState === 'live') ?? null
+    peer.screenVideo = await this.upsertSender(peer, peer.screenVideo, video, stream)
+    peer.screenAudio = await this.upsertSender(peer, peer.screenAudio, audio, stream)
+  }
+
+  private async upsertSender(
+    peer: Peer,
+    sender: RTCRtpSender | undefined,
+    track: MediaStreamTrack | null,
+    stream: MediaStream | null,
+  ) {
+    if (track && stream) {
+      if (!sender) {
+        const created = peer.pc.addTrack(track, stream)
+        if (track.kind === 'video') void this.preferScreenQuality(created)
+        return created
+      }
+      if (sender.track !== track) await sender.replaceTrack(track)
+      if (track.kind === 'video') void this.preferScreenQuality(sender)
+      return sender
+    }
+    if (sender?.track) await sender.replaceTrack(null)
+    return sender
+  }
+
+  private async preferScreenQuality(sender: RTCRtpSender) {
+    try {
+      const params = sender.getParameters()
+      if (!params.encodings?.length) params.encodings = [{}]
+      const encoding = params.encodings[0]
+      if (!encoding) return
+      encoding.maxBitrate = 3_000_000
+      encoding.maxFramerate = 30
+      encoding.priority = 'high'
+      params.degradationPreference = 'balanced'
+      await sender.setParameters(params)
+    } catch {
+      // Browsers reject sender parameters until the transport is ready.
+    }
+  }
+
+  private absorbScreenTrack(id: string, track: MediaStreamTrack) {
+    let bundle = this.screenBundles.get(id)
+    if (!bundle) {
+      bundle = new MediaStream()
+      this.screenBundles.set(id, bundle)
+    }
+    if (!bundle.getTracks().includes(track)) bundle.addTrack(track)
+    const publish = () => {
+      if (track.readyState === 'ended') bundle?.removeTrack(track)
+      const live = bundle?.getVideoTracks().some((item) => item.readyState === 'live') ?? false
+      if (!live) {
+        this.onScreen(id, null)
+        if ((bundle?.getTracks().length ?? 0) === 0) this.screenBundles.delete(id)
+        return
+      }
+      this.onScreen(id, bundle ?? null)
+    }
+    publish()
+    track.addEventListener('ended', publish, { once: true })
+  }
+
   private async attachTracks(peer: Peer, stream: MediaStream) {
     for (const kind of ['audio', 'video'] as const) {
       const track = kind === 'audio' ? stream.getAudioTracks()[0] : stream.getVideoTracks()[0]
       if (!track) continue
-      const transceiver = peer.pc.getTransceivers().find((item) => item.receiver.track.kind === kind)
+      const transceiver = peer.pc.getTransceivers().find((item) => {
+        if (item.sender === peer.screenVideo || item.sender === peer.screenAudio) return false
+        return item.receiver.track.kind === kind
+      })
       if (!transceiver) {
         peer.pc.addTrack(track, stream)
         continue

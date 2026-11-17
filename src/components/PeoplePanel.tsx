@@ -1,4 +1,4 @@
-import { Mic, MicOff, Video, VideoOff } from 'lucide-react'
+import { Mic, MicOff, MonitorUp, Video, VideoOff } from 'lucide-react'
 import { RankBadge } from '@/components/RankBadge.tsx'
 import { safeColor, type Participant } from '@/types.ts'
 
@@ -34,6 +34,7 @@ export function PeoplePanel({
                 data-color={safeColor(person.color)}
                 data-audio={person.audio ? 'true' : 'false'}
                 data-video={person.video ? 'true' : 'false'}
+                data-sharing={person.sharing ? 'true' : 'false'}
                 className="flex items-center gap-3 rounded-xl px-2 py-2"
               >
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink font-display text-sm">
@@ -52,6 +53,11 @@ export function PeoplePanel({
                 <span className="text-muted-foreground" aria-label={person.video ? 'กล้องเปิด' : 'กล้องปิด'}>
                   {person.video ? <Video className="size-4 text-teal" /> : <VideoOff className="size-4 text-rose" />}
                 </span>
+                {person.sharing ? (
+                  <span className="text-amber" aria-label="กำลังแชร์หน้าจอ">
+                    <MonitorUp className="size-4" />
+                  </span>
+                ) : null}
               </li>
             )
           })

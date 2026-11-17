@@ -80,6 +80,86 @@ export async function acquireMedia(): Promise<MediaResult> {
   }
 }
 
+const SCREEN_VIDEO: MediaTrackConstraints = {
+  width: { ideal: 1920, max: 1920 },
+  height: { ideal: 1080, max: 1080 },
+  frameRate: { ideal: 30, max: 30 },
+}
+
+export function screenShareBlockReason() {
+  if (typeof navigator === 'undefined') return 'เบราว์เซอร์นี้ยังแชร์หน้าจอไม่ได้'
+  const api = typeof navigator.mediaDevices?.getDisplayMedia === 'function'
+  const ua = navigator.userAgent || ''
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua)
+  const narrowTouch =
+    window.matchMedia('(pointer: coarse)').matches &&
+    window.matchMedia('(max-width: 900px)').matches &&
+    navigator.maxTouchPoints > 1
+  if (mobile || narrowTouch) return 'มือถือยังแชร์หน้าจอไม่ได้ ใช้คอมพิวเตอร์แทน'
+  if (!api) return 'เบราว์เซอร์นี้ยังแชร์หน้าจอไม่ได้ ใช้ Chrome, Edge, Firefox หรือ Safari บนคอมพิวเตอร์'
+  return null
+}
+
+function tuneScreen(stream: MediaStream) {
+  for (const track of stream.getVideoTracks()) {
+    track.contentHint = 'detail'
+    void track.applyConstraints(SCREEN_VIDEO).catch(() => {
+      // The browser already picked the closest mode it can send.
+    })
+  }
+}
+
+export async function captureScreen(): Promise<MediaResult> {
+  const blocked = screenShareBlockReason()
+  if (blocked) return { stream: null, warning: blocked }
+  const display = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices)
+  try {
+    const stream = await display({
+      video: SCREEN_VIDEO,
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    })
+    tuneScreen(stream)
+    return { stream, warning: null }
+  } catch (error) {
+    const name = errorName(error)
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'AbortError') {
+      return { stream: null, warning: null }
+    }
+  }
+
+  try {
+    const stream = await display({ video: SCREEN_VIDEO, audio: false })
+    tuneScreen(stream)
+    return { stream, warning: null }
+  } catch (error) {
+    const name = errorName(error)
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'AbortError') {
+      return { stream: null, warning: null }
+    }
+    return { stream: null, warning: 'แชร์หน้าจอไม่สำเร็จ ลองอีกครั้ง' }
+  }
+}
+
 export function stopStream(stream: MediaStream | null | undefined) {
   stream?.getTracks().forEach((track) => track.stop())
+}
+
+export function whenTrackEnds(track: MediaStreamTrack, onEnd: () => void) {
+  let done = false
+  const finish = () => {
+    if (done) return
+    done = true
+    window.clearInterval(timer)
+    track.removeEventListener('ended', finish)
+    onEnd()
+  }
+  track.addEventListener('ended', finish)
+  const timer = window.setInterval(() => {
+    if (track.readyState === 'ended') finish()
+  }, 200)
+  if (track.readyState === 'ended') finish()
 }

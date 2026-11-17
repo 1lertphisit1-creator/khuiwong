@@ -21,6 +21,7 @@ export type RoomRow = {
   owner_account_id: string | null
   mic_min_rank: string
   cam_min_rank: string
+  screen_min_rank: string
   created_at: number
 }
 
@@ -33,6 +34,7 @@ export type MemberRow = {
   mic_muted: number
   mic_blocked: number
   cam_blocked: number
+  screen_blocked: number
 }
 
 export type DjTrackRow = {
@@ -82,6 +84,7 @@ db.exec(`
     owner_account_id TEXT,
     mic_min_rank TEXT NOT NULL DEFAULT 'guest',
     cam_min_rank TEXT NOT NULL DEFAULT 'guest',
+    screen_min_rank TEXT NOT NULL DEFAULT 'member',
     created_at INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS room_members (
@@ -93,6 +96,7 @@ db.exec(`
     mic_muted INTEGER NOT NULL DEFAULT 0,
     mic_blocked INTEGER NOT NULL DEFAULT 0,
     cam_blocked INTEGER NOT NULL DEFAULT 0,
+    screen_blocked INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (room_id, account_id)
   );
   CREATE TABLE IF NOT EXISTS rank_colors (
@@ -125,6 +129,18 @@ db.exec(`
     started_at INTEGER
   );
 `)
+
+function columnNames(table: string) {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name)
+}
+
+function addColumn(table: string, column: string, definition: string) {
+  if (columnNames(table).includes(column)) return
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+}
+
+addColumn('rooms', 'screen_min_rank', "TEXT NOT NULL DEFAULT 'member'")
+addColumn('room_members', 'screen_blocked', 'INTEGER NOT NULL DEFAULT 0')
 
 export function insertAccount(row: AccountRow) {
   db.prepare(
@@ -165,8 +181,8 @@ export function getRoom(roomId: string) {
 export function insertRoom(roomId: string, ownerAccountId: string | null) {
   const now = Date.now()
   db.prepare(
-    'INSERT INTO rooms (id, owner_account_id, mic_min_rank, cam_min_rank, created_at) VALUES (?, ?, ?, ?, ?)',
-  ).run(roomId, ownerAccountId, 'guest', 'guest', now)
+    'INSERT INTO rooms (id, owner_account_id, mic_min_rank, cam_min_rank, screen_min_rank, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(roomId, ownerAccountId, 'guest', 'guest', 'member', now)
   const seed = db.prepare('INSERT INTO rank_colors (room_id, rank, color) VALUES (?, ?, ?)')
   for (const rank of RANK_IDS) seed.run(roomId, rank, defaultRankColor(rank))
   db.prepare(
@@ -182,6 +198,7 @@ export function insertRoom(roomId: string, ownerAccountId: string | null) {
       mic_muted: 0,
       mic_blocked: 0,
       cam_blocked: 0,
+      screen_blocked: 0,
     })
   }
 }
@@ -190,8 +207,13 @@ export function setRoomOwner(roomId: string, accountId: string) {
   db.prepare('UPDATE rooms SET owner_account_id = ? WHERE id = ?').run(accountId, roomId)
 }
 
-export function setRoomPolicy(roomId: string, micMinRank: RankId, camMinRank: RankId) {
-  db.prepare('UPDATE rooms SET mic_min_rank = ?, cam_min_rank = ? WHERE id = ?').run(micMinRank, camMinRank, roomId)
+export function setRoomPolicy(roomId: string, micMinRank: RankId, camMinRank: RankId, screenMinRank: RankId) {
+  db.prepare('UPDATE rooms SET mic_min_rank = ?, cam_min_rank = ?, screen_min_rank = ? WHERE id = ?').run(
+    micMinRank,
+    camMinRank,
+    screenMinRank,
+    roomId,
+  )
 }
 
 export function getMember(roomId: string, accountId: string) {
@@ -202,15 +224,16 @@ export function getMember(roomId: string, accountId: string) {
 
 export function upsertMember(row: MemberRow) {
   db.prepare(
-    `INSERT INTO room_members (room_id, account_id, rank, name_color, text_muted, mic_muted, mic_blocked, cam_blocked)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO room_members (room_id, account_id, rank, name_color, text_muted, mic_muted, mic_blocked, cam_blocked, screen_blocked)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(room_id, account_id) DO UPDATE SET
        rank = excluded.rank,
        name_color = excluded.name_color,
        text_muted = excluded.text_muted,
        mic_muted = excluded.mic_muted,
        mic_blocked = excluded.mic_blocked,
-       cam_blocked = excluded.cam_blocked`,
+       cam_blocked = excluded.cam_blocked,
+       screen_blocked = excluded.screen_blocked`,
   ).run(
     row.room_id,
     row.account_id,
@@ -220,6 +243,7 @@ export function upsertMember(row: MemberRow) {
     row.mic_muted,
     row.mic_blocked,
     row.cam_blocked,
+    row.screen_blocked,
   )
 }
 
@@ -234,7 +258,7 @@ export function updateMemberColor(roomId: string, accountId: string, color: stri
 export function updateMemberFlags(
   roomId: string,
   accountId: string,
-  flags: Partial<Pick<MemberRow, 'text_muted' | 'mic_muted' | 'mic_blocked' | 'cam_blocked'>>,
+  flags: Partial<Pick<MemberRow, 'text_muted' | 'mic_muted' | 'mic_blocked' | 'cam_blocked' | 'screen_blocked'>>,
 ) {
   const current = getMember(roomId, accountId)
   if (!current) return

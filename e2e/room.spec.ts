@@ -198,3 +198,70 @@ test('permission denial still allows text chat', async ({ browser }) => {
   await host.close()
   await blocked.close()
 })
+
+test('screen share reaches the other person', async ({ browser }) => {
+  test.setTimeout(90_000)
+  await mkdir(ARTIFACTS, { recursive: true })
+  const host = await browser.newContext()
+  const guest = await browser.newContext()
+  const mint = await host.newPage()
+  const arm = await guest.newPage()
+
+  await joinFromLobby(mint, 'มิ้นท์')
+  const roomUrl = mint.url()
+  await joinByLink(arm, roomUrl, 'อาร์ม')
+
+  await expect(mint.getByTestId('toggle-screen')).toBeEnabled()
+  await expect(mint.getByTestId('screen-unsupported')).toHaveCount(0)
+  await mint.getByTestId('toggle-screen').click()
+
+  const stage = arm.getByTestId('screen-stage')
+  await expect(stage).toBeVisible()
+  await expect(arm.getByTestId('screen-live')).toContainText('LIVE')
+  await expect(arm.getByTestId('screen-live')).toContainText('กำลังแชร์จอ')
+  await expect(arm.getByTestId('screen-sharer')).toHaveText('มิ้นท์')
+  await expect(arm.getByTestId('screen-fullscreen')).toBeVisible()
+  await expect(arm.getByTestId('camera-strip').locator('[data-testid="video-tile"][data-self="false"]')).toBeVisible()
+  await expect(arm.getByTestId('camera-strip').locator('[data-testid="video-tile"][data-sharing="true"]')).toBeVisible()
+  await expect(arm.getByTestId('participant').filter({ hasText: 'มิ้นท์' })).toHaveAttribute('data-sharing', 'true')
+
+  const remoteScreen = stage.locator('video')
+  await expect.poll(async () => remoteScreen.evaluate((el: HTMLVideoElement) => el.videoWidth)).toBeGreaterThan(0)
+  await expect.poll(async () => remoteScreen.evaluate((el: HTMLVideoElement) => el.videoHeight)).toBeGreaterThan(0)
+
+  await arm.screenshot({ path: `${ARTIFACTS}/screenshot_screen_share.png` })
+
+  await mint.evaluate(() => {
+    const video = document.querySelector('[data-testid="screen-stage"] video')
+    const media = video instanceof HTMLVideoElement ? video.srcObject : null
+    if (media instanceof MediaStream) {
+      for (const track of media.getTracks()) track.stop()
+    }
+  })
+  await expect(arm.getByTestId('screen-stage')).toHaveCount(0)
+  await expect(mint.getByTestId('toggle-screen')).toHaveAttribute('aria-pressed', 'false')
+  await expect(arm.getByTestId('chat-log').getByText('มิ้นท์ หยุดแชร์หน้าจอ')).toBeVisible()
+
+  await mint.getByTestId('open-admin').click()
+  await mint.getByTestId('admin-person').filter({ hasText: 'อาร์ม' }).getByTestId('block-screen').click()
+  await expect(arm.getByTestId('toggle-screen')).toBeDisabled()
+  await expect(arm.getByLabel('แชร์หน้าจอถูกจำกัดโดยผู้ดูแล')).toBeVisible()
+  await mint.getByTestId('admin-panel').getByRole('button', { name: 'ปิด', exact: true }).click()
+
+  await host.close()
+  await guest.close()
+})
+
+test('mobile browsers explain that screen share is unavailable', async ({ browser }) => {
+  const mobile = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+  })
+  const page = await mobile.newPage()
+  await joinFromLobby(page, 'มิ้นท์')
+  await expect(page.getByTestId('toggle-screen')).toBeDisabled()
+  await expect(page.getByTestId('screen-unsupported')).toContainText('มือถือยังแชร์หน้าจอไม่ได้')
+  await mobile.close()
+})
