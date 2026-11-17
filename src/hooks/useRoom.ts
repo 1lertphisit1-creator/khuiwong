@@ -81,6 +81,7 @@ export function useRoom({
   const audioOn = (audioOverride ?? trackEnabled(localStream)) && self.micAllowed
   const me = participants.find((person) => person.id === selfId) ?? null
 
+  const nameRef = useRef(displayName)
   const socketRef = useRef<Socket | null>(null)
   const streamRef = useRef(localStream)
   const screenRef = useRef<MediaStream | null>(null)
@@ -175,13 +176,18 @@ export function useRoom({
       socket.on('connect', () => {
         if (stopped || fatal) return
         setStatus((current) => (current === 'connected' ? current : 'connecting'))
-        socket?.emit('join', {
-          roomId,
-          displayName,
-          token: sessionToken(),
-          audio: flagsRef.current.audio,
-          video: false,
-        })
+        const name = nameRef.current.trim()
+        if (name) {
+          socket?.emit('join', {
+            roomId,
+            displayName: name,
+            token: sessionToken(),
+            audio: flagsRef.current.audio,
+            video: false,
+          })
+        } else {
+          socket?.emit('watch', { roomId })
+        }
       })
 
       socket.on('disconnect', () => {
@@ -207,6 +213,20 @@ export function useRoom({
         setError(message)
         setStatus('disconnected')
         socket?.io.reconnection(false)
+      })
+
+      socket.on('watch-state', (payload: RoomState) => {
+        if (stopped || fatal || nameRef.current.trim()) return
+        setError(null)
+        setSelfId(null)
+        selfIdRef.current = null
+        setParticipants(payload.participants)
+        setMessages(payload.messages)
+        setPolicy(payload.policy)
+        setRankColors(payload.rankColors)
+        setDj(payload.dj)
+        if (payload.caps) setCaps(payload.caps)
+        setStatus('connected')
       })
 
       socket.on('room-state', (payload: RoomState) => {
@@ -318,7 +338,31 @@ export function useRoom({
       socket?.disconnect()
       socketRef.current = null
     }
-  }, [displayName, roomId])
+  }, [roomId])
+
+  function enter(name: string) {
+    nameRef.current = name
+    const socket = socketRef.current
+    if (!socket?.connected) return false
+    socket.emit('join', {
+      roomId,
+      displayName: name,
+      token: sessionToken(),
+      audio: flagsRef.current.audio,
+      video: false,
+    })
+    return true
+  }
+
+  function exit() {
+    nameRef.current = ''
+    const socket = socketRef.current
+    setSelfId(null)
+    selfIdRef.current = null
+    if (!socket?.connected) return
+    socket.emit('leave')
+    socket.emit('watch', { roomId })
+  }
 
   useEffect(() => {
     if (status !== 'connected') return
@@ -502,6 +546,8 @@ export function useRoom({
     bindScreen,
     sendChat,
     send,
+    enter,
+    exit,
   }
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Backdrop } from '@/components/Backdrop.tsx'
 import { BackgroundMusic } from '@/components/BackgroundMusic.tsx'
-import { Lobby } from '@/components/Lobby.tsx'
+import { MainHall } from '@/components/MainHall.tsx'
 import { NewsPanel } from '@/components/NewsPanel.tsx'
 import { PriceTicker } from '@/components/PriceTicker.tsx'
 import { RoomPage } from '@/components/RoomPage.tsx'
@@ -21,8 +21,8 @@ export default function App() {
       <Backdrop />
       <div className="relative flex h-dvh flex-col">
         <PriceTicker />
-        <div className="min-h-0 flex-1 overflow-auto">{route.name === 'room' ? <RoomPage code={route.code} /> : <Lobby />}</div>
-        <NewsPanel />
+        <div className="min-h-0 flex-1 overflow-hidden">{route.name === 'room' ? <RoomPage code={route.code} /> : <MainHall />}</div>
+        {route.name === 'room' ? <NewsPanel /> : null}
         <BackgroundMusic />
       </div>
     </div>

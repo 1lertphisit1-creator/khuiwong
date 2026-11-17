@@ -26,8 +26,8 @@ const DEFAULTS: NewsConfig = {
   xApi: false,
 }
 
-export function NewsPanel() {
-  const [open, setOpen] = useState(false)
+export function NewsPanel({ embedded = false }: { embedded?: boolean }) {
+  const [open, setOpen] = useState(embedded)
   const [tab, setTab] = useState<Tab>('facebook')
   const [config, setConfig] = useState<NewsConfig>(DEFAULTS)
   const [posts, setPosts] = useState<NewsPost[]>([])
@@ -68,6 +68,7 @@ export function NewsPanel() {
 
   return (
     <>
+      {embedded ? null : (
       <button
         type="button"
         data-testid="open-news"
@@ -78,19 +79,26 @@ export function NewsPanel() {
         ข่าว
         {fresh > 0 ? <span className="ml-1 rounded-full bg-rose px-1.5 text-[10px] text-paper">{fresh}</span> : null}
       </button>
+      )}
       {open ? (
         <section
           data-testid="news-panel"
-          className="fixed inset-x-0 bottom-0 z-30 flex h-[72dvh] flex-col border border-gold/45 bg-[#2a1218] shadow-2xl md:inset-x-auto md:top-14 md:right-3 md:bottom-3 md:h-auto md:w-[min(400px,calc(100vw-1.5rem))] md:rounded-2xl"
+          className={
+            embedded
+              ? 'flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gold/45 bg-[#2a1218]'
+              : 'fixed inset-x-0 bottom-0 z-30 flex h-[72dvh] flex-col border border-gold/45 bg-[#2a1218] shadow-2xl md:inset-x-auto md:top-14 md:right-3 md:bottom-3 md:h-auto md:w-[min(400px,calc(100vw-1.5rem))] md:rounded-2xl'
+          }
         >
           <header className="flex items-center gap-2 border-b border-gold/30 px-3 py-2">
             <h2 className="font-display text-lg font-bold text-gold">ข่าว Crypto</h2>
             <Button type="button" size="sm" variant="secondary" data-testid="news-refresh" onClick={() => setReloadKey((key) => key + 1)}>
               รีเฟรช
             </Button>
+            {embedded ? null : (
             <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={() => setOpen(false)}>
               ปิด
             </Button>
+            )}
           </header>
           <div className="grid grid-cols-2 gap-2 px-3 pt-2" role="tablist">
             <TabButton current={tab} id="facebook" onSelect={setTab}>

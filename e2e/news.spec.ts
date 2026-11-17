@@ -7,7 +7,6 @@ test('crypto news panel opens without covering the room', async ({ page }) => {
   test.setTimeout(40_000)
   await mkdir(ARTIFACTS, { recursive: true })
   await page.goto('/')
-  await page.getByTestId('open-news').click()
   await expect(page.getByTestId('news-panel')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'ข่าว Crypto' })).toBeVisible()
   await expect(page.getByTestId('news-facebook')).toBeVisible()
@@ -23,7 +22,6 @@ test('crypto news panel opens without covering the room', async ({ page }) => {
   await expect(xFrame.or(xFallback).first()).toBeVisible({ timeout: 12_000 })
   await page.screenshot({ path: `${ARTIFACTS}/screenshot_news_x.png` })
 
-  await page.getByRole('button', { name: 'ปิด' }).click()
-  await expect(page.getByTestId('news-panel')).toHaveCount(0)
-  await expect(page.getByTestId('create-room')).toBeVisible()
+  await expect(page.getByTestId('enter-room')).toBeVisible()
+  await expect(page.getByTestId('chat-log')).toBeVisible()
 })
