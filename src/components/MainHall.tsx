@@ -7,6 +7,7 @@ import { DjPlayer } from '@/components/DjPlayer.tsx'
 import { EtfFlowCard } from '@/components/EtfFlowCard.tsx'
 import { FollowLinks } from '@/components/FollowLinks.tsx'
 import { NewsPanel } from '@/components/NewsPanel.tsx'
+import { PriceWatchlist } from '@/components/PriceWatchlist.tsx'
 import { PeoplePanel } from '@/components/PeoplePanel.tsx'
 import { RankBadge } from '@/components/RankBadge.tsx'
 import { VideoStage } from '@/components/VideoStage.tsx'
@@ -21,7 +22,7 @@ import { cn } from '@/lib/utils.ts'
 import type { Participant, Permissions } from '@/types.ts'
 
 const MAIN_ROOM = 'MAIN'
-type Pane = 'room' | 'people' | 'news' | 'market'
+type Pane = 'room' | 'people' | 'news' | 'price' | 'market'
 
 export function MainHall() {
   const [account, setAccount] = useState<Account | null>(null)
@@ -107,8 +108,8 @@ export function MainHall() {
   return (
     <main data-testid="lobby" className="flex h-full min-h-0 flex-col">
       <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[17rem_minmax(0,1fr)_22rem]">
-        <aside className={cn('min-h-0 flex-col gap-3 lg:flex', pane === 'market' ? 'flex' : 'hidden')}>
-          <figure className="ornament-panel relative overflow-hidden rounded-2xl">
+        <aside className={cn('min-h-0 flex-col gap-3 overflow-y-auto pb-24 lg:flex lg:pb-28', pane === 'market' || pane === 'price' ? 'flex' : 'hidden')}>
+          <figure className={cn('ornament-panel relative overflow-hidden rounded-2xl', pane === 'price' && 'hidden lg:block')}>
             <img
               src="/brand/fibo99-hero.webp"
               alt="FIBO99"
@@ -124,6 +125,7 @@ export function MainHall() {
               </div>
             </figcaption>
           </figure>
+          <div className={pane === 'price' ? 'hidden lg:block' : undefined}>
           <AccountBox
             account={account}
             nickname={nickname}
@@ -140,7 +142,9 @@ export function MainHall() {
               setAccount(null)
             }}
           />
-          <div className="min-h-0 flex-1 overflow-auto">
+          </div>
+          <PriceWatchlist />
+          <div className={cn('shrink-0', pane === 'price' && 'hidden lg:block')}>
             <EtfFlowCard />
           </div>
         </aside>
@@ -279,10 +283,11 @@ export function MainHall() {
       </div>
 
       <FollowLinks />
-      <nav className="grid grid-cols-4 border-t border-gold/30 bg-burgundy/90 lg:hidden">
+      <nav className="grid grid-cols-5 border-t border-gold/30 bg-burgundy/90 lg:hidden">
         <PaneButton current={pane} id="room" onSelect={setPane}>ห้อง</PaneButton>
         <PaneButton current={pane} id="people" onSelect={setPane}>ผู้คน</PaneButton>
         <PaneButton current={pane} id="news" onSelect={setPane}>ข่าว</PaneButton>
+        <PaneButton current={pane} id="price" onSelect={setPane}>ราคา</PaneButton>
         <PaneButton current={pane} id="market" onSelect={setPane}>แบรนด์</PaneButton>
       </nav>
 
@@ -370,7 +375,7 @@ function AccountBox({
 function PaneButton({ current, id, onSelect, children }: { current: Pane; id: Pane; onSelect: (id: Pane) => void; children: string }) {
   const active = current === id
   return (
-    <button type="button" className={cn('py-3 text-sm', active ? 'font-medium text-amber' : 'text-muted-foreground')} onClick={() => onSelect(id)}>
+    <button type="button" className={cn('py-3 text-xs sm:text-sm', active ? 'font-medium text-amber' : 'text-muted-foreground')} onClick={() => onSelect(id)}>
       {children}
     </button>
   )
