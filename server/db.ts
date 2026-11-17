@@ -55,6 +55,19 @@ export type DjPlaybackRow = {
   started_at: number | null
 }
 
+export function readCache(key: string) {
+  return db.prepare('SELECT payload, fetched_at FROM app_cache WHERE key = ?').get(key) as
+    | { payload: string; fetched_at: number }
+    | undefined
+}
+
+export function writeCache(key: string, payload: string, fetchedAt: number) {
+  db.prepare(
+    `INSERT INTO app_cache (key, payload, fetched_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at`,
+  ).run(key, payload, fetchedAt)
+}
+
 export function dataDir() {
   const configured = process.env.DATA_DIR?.trim()
   return configured ? path.resolve(configured) : path.resolve(process.cwd(), 'data')
@@ -120,6 +133,11 @@ db.exec(`
     mime TEXT NOT NULL,
     position INTEGER NOT NULL,
     created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS app_cache (
+    key TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS dj_playback (
     room_id TEXT PRIMARY KEY,

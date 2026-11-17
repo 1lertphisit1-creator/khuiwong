@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
+import { EtfFlowCard } from '@/components/EtfFlowCard.tsx'
 import { FollowLinks } from '@/components/FollowLinks.tsx'
 import { rememberName, stageEntry, storedName } from '@/lib/entry.ts'
 import { acquireMedia } from '@/lib/media.ts'
@@ -91,8 +92,12 @@ export function Lobby() {
 
   return (
     <main data-testid="lobby" className="mx-auto flex min-h-full w-full max-w-6xl flex-col px-4 py-6 sm:px-8 sm:py-8">
-      <section className="grid flex-1 items-center gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,26rem)] lg:gap-10">
-        <figure className="ornament-panel relative overflow-hidden rounded-[1.6rem]">
+      <section className="grid flex-1 items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,26rem)] lg:gap-10">
+        <div className="flex flex-col gap-4">
+          <div className="order-2 lg:order-1">
+            <EtfFlowCard />
+          </div>
+        <figure className="ornament-panel relative order-1 overflow-hidden rounded-[1.6rem] lg:order-2">
           <img
             src="/brand/fibo99-hero.webp"
             alt="FIBO99"
@@ -114,6 +119,7 @@ export function Lobby() {
             </div>
           </figcaption>
         </figure>
+        </div>
 
         <div className="ornament-panel rounded-[1.6rem] p-5 sm:p-6">
           {account ? (

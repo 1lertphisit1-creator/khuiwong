@@ -18,6 +18,7 @@ import {
   nicknameKey,
   registerAccount,
 } from './auth.ts'
+import { EtfFeed, type EtfBoard } from './etf.ts'
 import { NewsFeed, newsConfig } from './news.ts'
 import { PriceFeed, type PriceBoard } from './prices.ts'
 import {
@@ -222,6 +223,7 @@ type ServerToClient = {
   'screen-chunk': (payload: { id: string; gen: number; seq: number; mime: string; chunk: Buffer }) => void
   'screen-end': (payload: { id: string; gen: number }) => void
   prices: (payload: PriceBoard) => void
+  'etf-flows': (payload: EtfBoard) => void
   'news-posts': (payload: { id: string; text: string; createdAt: string; url: string }[]) => void
   'participant-joined': (participant: PublicParticipant) => void
   'participant-left': (payload: { id: string }) => void
@@ -335,6 +337,11 @@ function isSignal(data: unknown): data is SignalData {
     return true
   }
   return false
+}
+
+function requestIp(req: Request) {
+  const ip = (req.ip || req.socket.remoteAddress || '').replace(/^::ffff:/, '')
+  return ip || 'unknown'
 }
 
 function clientAddress(address: string | undefined) {
@@ -680,6 +687,7 @@ async function main() {
     maxHttpBufferSize: 1_000_000,
   })
 
+  app.set('trust proxy', 1)
   app.disable('x-powered-by')
   app.use((req, _res, next) => {
     if ((req.url ?? '').startsWith('/socket.io')) return
@@ -702,6 +710,27 @@ async function main() {
       .filter((room) => room.people > 0)
       .sort((a, b) => b.people - a.people || a.id.localeCompare(b.id))
     res.json({ rooms: list })
+  })
+
+  const etf = new EtfFeed((board) => {
+    io.emit('etf-flows', board)
+  })
+  etf.start()
+
+  app.get('/api/etf-flows', (_req, res) => {
+    if (!etf.board) {
+      res.status(200).json({
+        btc: null,
+        eth: null,
+        updatedAt: 0,
+        source: 'cache',
+        sourceUrl: 'https://farside.co.uk/',
+        stale: true,
+        message: 'ยังไม่มีข้อมูลวันนี้',
+      })
+      return
+    }
+    res.json(etf.board)
   })
 
   const prices = new PriceFeed((board) => {
@@ -762,7 +791,7 @@ async function main() {
       res.status(400).json({ message: 'ชื่อหรือรหัสผ่านไม่ถูกต้อง' })
       return
     }
-    const result = loginAccount(nickname, password, hashIp(clientAddress(req.socket.remoteAddress)))
+    const result = loginAccount(nickname, password, hashIp(`${requestIp(req)}|${nicknameKey(nickname)}`))
     if ('error' in result && result.error) {
       const status = result.error.includes('บ่อย') ? 429 : 401
       res.status(status).json({ message: result.error })
@@ -882,6 +911,7 @@ async function main() {
     const board = prices.snapshot()
     if (board) socket.emit('prices', board)
     if (news.posts.length > 0) socket.emit('news-posts', news.posts)
+    if (etf.board) socket.emit('etf-flows', etf.board)
     socket.on('join', (payload) => {
       const roomId = cleanRoomId(payload?.roomId)
       const account = accountFromToken(payload?.token)
