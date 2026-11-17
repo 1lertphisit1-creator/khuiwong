@@ -712,9 +712,17 @@ async function main() {
     res.json({ rooms: list })
   })
 
-  const etf = new EtfFeed((board) => {
-    io.emit('etf-flows', board)
+  const prices = new PriceFeed((board) => {
+    io.emit('prices', board)
   })
+  prices.start()
+
+  const etf = new EtfFeed(
+    (board) => {
+      io.emit('etf-flows', board)
+    },
+    (asset) => prices.snapshot()?.quotes.find((quote) => quote.symbol === asset)?.usd ?? null,
+  )
   etf.start()
 
   app.get('/api/etf-flows', (_req, res) => {
@@ -732,11 +740,6 @@ async function main() {
     }
     res.json(etf.board)
   })
-
-  const prices = new PriceFeed((board) => {
-    io.emit('prices', board)
-  })
-  prices.start()
 
   const news = new NewsFeed((posts) => {
     io.emit('news-posts', posts)
