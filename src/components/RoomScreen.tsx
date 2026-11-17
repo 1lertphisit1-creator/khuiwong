@@ -120,7 +120,7 @@ export function RoomScreen({
         : 'กำลังเชื่อมต่อใหม่'
 
   return (
-    <main data-testid="room" className="flex h-dvh flex-col">
+    <main data-testid="room" className="flex h-full min-h-[100%] flex-col">
       <header className="flex items-center gap-2 border-b border-gold/35 bg-burgundy/80 px-3 py-2.5 backdrop-blur sm:gap-4 sm:px-4">
         <Logo compact />
         <div className="min-w-0">

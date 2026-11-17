@@ -70,7 +70,7 @@ export function Lobby() {
   }
 
   return (
-    <main data-testid="lobby" className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col justify-center px-4 py-8 sm:px-8">
+    <main data-testid="lobby" className="mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center px-4 py-8 sm:px-8">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <Logo />
         <p className="rounded-full border border-gold/40 bg-ink/60 px-3 py-1 text-sm text-gold">เจ้าของ: FIBO99</p>
