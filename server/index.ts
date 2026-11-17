@@ -164,6 +164,8 @@ type DjSnapshot = {
 }
 
 type ClientToServer = {
+  watch: (payload: { roomId?: string }) => void
+  leave: () => void
   join: (payload: {
     roomId?: string
     displayName?: string
@@ -201,6 +203,15 @@ type ClientToServer = {
 }
 
 type ServerToClient = {
+  'watch-state': (payload: {
+    roomId: string
+    participants: PublicParticipant[]
+    messages: ChatMessage[]
+    policy: { micMinRank: RankId; camMinRank: RankId; screenMinRank: RankId }
+    rankColors: Record<RankId, string>
+    dj: DjSnapshot
+    caps: { people: number; speakers: number }
+  }) => void
   'room-state': (payload: {
     selfId: string
     roomId: string
@@ -251,6 +262,7 @@ type SocketData = {
   name?: string
   accountId?: string | null
   suppressLeave?: boolean
+  watching?: string
 }
 
 type AppSocket = Socket<ClientToServer, ServerToClient, Record<string, never>, SocketData>
@@ -685,8 +697,12 @@ function roomStatePayload(socket: AppSocket, roomId: string, live: LiveRoom, use
     }
 }
 
+const MAIN_ROOM_ID = 'MAIN'
+
 async function main() {
   ensureSiteOwner()
+  ensureRoomRecord(MAIN_ROOM_ID, null)
+  grantSiteOwnerRoom(MAIN_ROOM_ID)
   const app = express()
   const httpServer = createServer(app)
   const io: AppServer = new Server(httpServer, {
@@ -946,6 +962,27 @@ async function main() {
     if (news.posts.length > 0) socket.emit('news-posts', news.posts)
     if (etf.board) socket.emit('etf-flows', etf.board)
     socket.emit('site-settings', musicSettings())
+    socket.on('watch', (payload) => {
+      if (socket.data.roomId) return
+      const roomId = cleanRoomId(payload?.roomId) ?? MAIN_ROOM_ID
+      ensureRoomRecord(roomId, null)
+      const live = openLive(roomId)
+      if (!live) return
+      socket.join(roomId)
+      socket.data.watching = roomId
+      socket.emit('watch-state', {
+        roomId,
+        participants: sortedParticipants(live),
+        messages: live.messages,
+        policy: live.policy,
+        rankColors: live.rankColors,
+        dj: djSnapshot(roomId),
+        caps: { people: MAX_PARTICIPANTS, speakers: MAX_SPEAKERS },
+      })
+    })
+    socket.on('leave', () => {
+      removeFromRoom(io, socket)
+    })
     socket.on('join', (payload) => {
       const roomId = cleanRoomId(payload?.roomId)
       const account = accountFromToken(payload?.token)

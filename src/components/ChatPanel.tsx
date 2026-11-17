@@ -13,12 +13,14 @@ export function ChatPanel({
   disabled,
   blocked,
   onSend,
+  hideComposer,
 }: {
   messages: ChatMessage[]
   selfId: string | null
   disabled: boolean
   blocked?: boolean
   onSend: (text: string) => boolean
+  hideComposer?: boolean
 }) {
   const [text, setText] = useState('')
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -92,6 +94,7 @@ export function ChatPanel({
           })
         )}
       </div>
+      {hideComposer ? null : (
       <form
         className="flex items-center gap-2 border-t border-border p-3"
         onSubmit={(event) => {
@@ -123,6 +126,7 @@ export function ChatPanel({
           <Send />
         </Button>
       </form>
+      )}
     </section>
   )
 }

@@ -5,7 +5,9 @@ const ARTIFACTS = '/opt/cursor/artifacts'
 
 async function signIn(page: Page, name: string) {
   await page.goto('/')
-  await page.getByLabel('ชื่อบัญชี').fill(name)
+  const account = page.getByLabel('ชื่อบัญชี')
+  if (!(await account.isVisible())) await page.getByRole('button', { name: 'แบรนด์' }).click()
+  await account.fill(name)
   await page.getByLabel('รหัสผ่าน').fill('password123')
   await page.getByTestId('register').click()
   const signedIn = page.getByTestId('session-name')
@@ -17,7 +19,19 @@ async function signIn(page: Page, name: string) {
 
 async function joinFromLobby(page: Page, name: string) {
   await signIn(page, name)
-  await page.getByTestId('create-room').click()
+  const roomId = await page.evaluate(async () => {
+    const token = localStorage.getItem('khuiwong.token') ?? ''
+    const response = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    const data = (await response.json()) as { roomId?: string }
+    if (!response.ok || !data.roomId) throw new Error('create failed')
+    return data.roomId
+  })
+  await page.goto(`/room/${roomId}`)
+  await page.getByTestId('confirm-join').click()
   await expect(page.getByTestId('room')).toBeVisible()
   await expect(page.getByTestId('connection-status')).toContainText('เชื่อมต่อแล้ว')
   await expect(page.getByTestId('participant').filter({ hasText: name })).toHaveAttribute('data-rank', 'owner')
@@ -67,11 +81,7 @@ test('two people exchange text and media', async ({ browser }) => {
 
   await mint.goto('/')
   await mint.screenshot({ path: `${ARTIFACTS}/screenshot_lobby.png` })
-  await signIn(mint, 'มิ้นท์')
-  await mint.getByTestId('create-room').click()
-  await expect(mint.getByTestId('room')).toBeVisible()
-  await expect(mint.getByTestId('connection-status')).toContainText('เชื่อมต่อแล้ว')
-  await expect(mint.getByTestId('participant').filter({ hasText: 'มิ้นท์' })).toHaveAttribute('data-rank', 'owner')
+  await joinFromLobby(mint, 'มิ้นท์')
 
   const roomUrl = mint.url()
   expect(roomUrl).toMatch(/\/room\/[A-Z0-9]{6}$/)

@@ -54,7 +54,6 @@ export function BackgroundMusic() {
   const [volume, setVolume] = useState(readVolume)
   const [needsTap, setNeedsTap] = useState(false)
   const [ducked, setDucked] = useState(false)
-  const [inRoom, setInRoom] = useState(() => window.location.pathname.startsWith('/room/'))
   const hostRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<YtPlayer | null>(null)
   const volumeRef = useRef(volume)
@@ -87,12 +86,6 @@ export function BackgroundMusic() {
         // The iframe rejects calls until onReady.
       }
     }
-  }, [])
-
-  useEffect(() => {
-    const sync = () => setInRoom(window.location.pathname.startsWith('/room/'))
-    window.addEventListener('popstate', sync)
-    return () => window.removeEventListener('popstate', sync)
   }, [])
 
   useEffect(() => {
@@ -286,7 +279,7 @@ export function BackgroundMusic() {
   return (
     <aside
       data-testid="bgm-player"
-      className={`fixed left-3 z-20 w-[min(22rem,calc(100vw-1.5rem))] rounded-2xl border border-gold/50 bg-[#3a1820]/95 p-2 text-cream shadow-xl ${inRoom ? 'bottom-20 lg:bottom-4' : 'bottom-3'}`}
+      className="fixed bottom-20 left-3 z-20 w-[min(22rem,calc(100vw-1.5rem))] rounded-2xl border border-gold/50 bg-[#3a1820]/95 p-2 text-cream shadow-xl lg:bottom-4"
     >
       <div className="flex items-center gap-2">
         <div ref={hostRef} data-testid="bgm-embed" className="h-[90px] w-[160px] shrink-0 overflow-hidden rounded-lg bg-ink" />
