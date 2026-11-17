@@ -224,7 +224,12 @@ export function useRoom({
         if (payload.caps) setCaps(payload.caps)
         setStatus('connected')
         applyControl(payload.self)
-        if (screenRef.current) socket?.emit('screen-state', { sharing: true })
+        if (screenRef.current) {
+          socket?.emit('screen-state', {
+            sharing: true,
+            audio: screenRef.current.getAudioTracks().some((track) => track.readyState === 'live'),
+          })
+        }
       })
 
       socket.on('participant-joined', (person: Participant) => {
@@ -271,8 +276,10 @@ export function useRoom({
         setParticipants((current) => current.map((person) => (person.id === id ? { ...person, audio, video } : person)))
       })
 
-      socket.on('screen-state', ({ id, sharing: next }: { id: string; sharing: boolean }) => {
-        setParticipants((current) => current.map((person) => (person.id === id ? { ...person, sharing: next } : person)))
+      socket.on('screen-state', ({ id, sharing: next, audio }: { id: string; sharing: boolean; audio?: boolean }) => {
+        setParticipants((current) =>
+          current.map((person) => (person.id === id ? { ...person, sharing: next, screenAudio: Boolean(audio && next) } : person)),
+        )
         if (id === selfIdRef.current && !next && screenRef.current) releaseRef.current(false)
         if (!next) {
           screenPlayer.current?.close()
@@ -446,7 +453,10 @@ export function useRoom({
     setScreenStream(result.stream)
     setSharing(true)
     setScreenNotice(null)
-    socketRef.current?.emit('screen-state', { sharing: true })
+    socketRef.current?.emit('screen-state', {
+      sharing: true,
+      audio: result.stream.getAudioTracks().some((track) => track.readyState === 'live'),
+    })
     return true
   }
 

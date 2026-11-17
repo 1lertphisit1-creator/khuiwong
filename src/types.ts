@@ -21,6 +21,7 @@ export type Participant = {
   audio: boolean
   video: boolean
   sharing: boolean
+  screenAudio?: boolean
   textMuted: boolean
   micMuted: boolean
   micBlocked: boolean

@@ -234,6 +234,13 @@ export function setRoomPolicy(roomId: string, micMinRank: RankId, camMinRank: Ra
   )
 }
 
+export function accountHasStaffRank(accountId: string) {
+  const row = db
+    .prepare(`SELECT 1 AS ok FROM room_members WHERE account_id = ? AND rank IN ('owner', 'admin') LIMIT 1`)
+    .get(accountId) as { ok: number } | undefined
+  return Boolean(row)
+}
+
 export function getMember(roomId: string, accountId: string) {
   return db.prepare('SELECT * FROM room_members WHERE room_id = ? AND account_id = ?').get(roomId, accountId) as
     | MemberRow

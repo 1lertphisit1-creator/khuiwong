@@ -70,6 +70,18 @@ export function RoomScreen({
     )
   }, [room.audioOn, room.participants, room.selfId, room.sharing])
 
+  useEffect(() => {
+    const micLive = people.some((person) => person.speaking || (person.speaker && person.audio))
+    const screenAudio =
+      people.some((person) => person.id !== room.selfId && person.sharing && person.screenAudio) ||
+      (room.sharing && (room.screenStream?.getAudioTracks().some((track) => track.readyState === 'live') ?? false))
+    const duck = Boolean(room.dj.playing || micLive || screenAudio)
+    window.dispatchEvent(new CustomEvent('khuiwong-bgm', { detail: { duck } }))
+    return () => {
+      window.dispatchEvent(new CustomEvent('khuiwong-bgm', { detail: { duck: false } }))
+    }
+  }, [people, room.dj.playing, room.screenStream, room.selfId, room.sharing])
+
   async function retry() {
     setRetrying(true)
     const next = await acquireMedia()
