@@ -15,8 +15,8 @@ test('theme lobby and room on desktop and mobile', async ({ browser }) => {
   await expect(page.getByTestId('price-ticker')).toContainText('ETH')
   await expect(page.getByTestId('price-ticker')).toContainText('SOL')
   await expect(page.getByTestId('price-ticker')).toHaveAttribute('data-live', 'true', { timeout: 20_000 })
-  await expect(page.getByText('เจ้าของ: FIBO99')).toBeVisible()
-  await expect(page.getByRole('img', { name: /มาสคอต FIBO99/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'FIBO99' })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'FIBO99' })).toBeVisible()
   await expect(page.getByTestId('follow-fibo').getByRole('link', { name: /Facebook/ })).toHaveAttribute('target', '_blank')
   await page.screenshot({ path: `${ARTIFACTS}/screenshot_lobby_desktop.png`, fullPage: true })
 

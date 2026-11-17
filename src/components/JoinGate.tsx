@@ -38,7 +38,7 @@ export function JoinGate({
   return (
     <main className="grid min-h-dvh place-items-center px-4 py-10">
       <form
-        className="w-full max-w-md rounded-[1.6rem] border border-border bg-card/90 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)]"
+        className="ornament-panel w-full max-w-md rounded-[1.6rem] p-6"
         onSubmit={(event) => {
           event.preventDefault()
           const displayName = account?.nickname ?? cleanDisplayName(name)
@@ -80,11 +80,9 @@ export function JoinGate({
           <p role="alert" className="mt-3 text-sm text-rose">
             {error}
           </p>
-        ) : (
-          <p className="mt-3 text-sm text-muted-foreground">ใช้ชื่อนี้ให้คนในห้องเห็น</p>
-        )}
+        ) : null}
         <Button type="submit" size="lg" className="mt-5 w-full" disabled={pending} data-testid="confirm-join">
-          {pending ? 'กำลังเปิดอุปกรณ์...' : 'เข้าร่วมห้อง'}
+          {pending ? 'กำลังเข้า...' : 'เข้าร่วมห้อง'}
         </Button>
         <Button type="button" variant="ghost" className="mt-2 w-full" onClick={() => go('/')}>
           กลับหน้าแรก
