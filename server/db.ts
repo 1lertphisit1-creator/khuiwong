@@ -251,6 +251,33 @@ export function updateMemberRank(roomId: string, accountId: string, rank: RankId
   db.prepare('UPDATE room_members SET rank = ? WHERE room_id = ? AND account_id = ?').run(rank, roomId, accountId)
 }
 
+export function updateAccountPassword(id: string, passwordHash: string) {
+  db.prepare('UPDATE accounts SET password_hash = ? WHERE id = ?').run(passwordHash, id)
+}
+
+export function listRoomIds() {
+  return (db.prepare('SELECT id FROM rooms').all() as { id: string }[]).map((row) => row.id)
+}
+
+export function grantOwnerMembership(roomId: string, accountId: string) {
+  const existing = getMember(roomId, accountId)
+  if (!existing) {
+    upsertMember({
+      room_id: roomId,
+      account_id: accountId,
+      rank: 'owner',
+      name_color: null,
+      text_muted: 0,
+      mic_muted: 0,
+      mic_blocked: 0,
+      cam_blocked: 0,
+      screen_blocked: 0,
+    })
+    return
+  }
+  if (existing.rank !== 'owner') updateMemberRank(roomId, accountId, 'owner')
+}
+
 export function updateMemberColor(roomId: string, accountId: string, color: string | null) {
   db.prepare('UPDATE room_members SET name_color = ? WHERE room_id = ? AND account_id = ?').run(color, roomId, accountId)
 }

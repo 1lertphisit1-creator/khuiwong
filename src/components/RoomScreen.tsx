@@ -4,6 +4,7 @@ import { AdminPanel } from '@/components/AdminPanel.tsx'
 import { ChatPanel } from '@/components/ChatPanel.tsx'
 import { ControlBar } from '@/components/ControlBar.tsx'
 import { DjPlayer } from '@/components/DjPlayer.tsx'
+import { FollowLinks } from '@/components/FollowLinks.tsx'
 import { PeoplePanel } from '@/components/PeoplePanel.tsx'
 import { RankBadge } from '@/components/RankBadge.tsx'
 import { VideoStage } from '@/components/VideoStage.tsx'
@@ -122,8 +123,8 @@ export function RoomScreen({
 
   return (
     <main data-testid="room" className="flex h-dvh flex-col">
-      <header className="flex items-center gap-2 border-b border-border bg-card/70 px-3 py-2.5 backdrop-blur sm:gap-4 sm:px-4">
-        <Logo className="hidden sm:inline-flex" />
+      <header className="flex items-center gap-2 border-b border-gold/35 bg-burgundy/80 px-3 py-2.5 backdrop-blur sm:gap-4 sm:px-4">
+        <Logo compact />
         <div className="min-w-0">
           <div className="text-[11px] tracking-wide text-muted-foreground">รหัสห้อง</div>
           <div className="flex items-center gap-1">
@@ -240,10 +241,11 @@ export function RoomScreen({
             <ChatPanel
               messages={room.messages}
               selfId={room.selfId}
-disabled={room.status !== 'connected'}
-            blocked={room.self.textMuted}
-            onSend={room.sendChat}
-          />
+              disabled={room.status !== 'connected'}
+              blocked={room.self.textMuted}
+              onSend={room.sendChat}
+            />
+            <FollowLinks />
           </aside>
         ) : (
           <>
@@ -284,7 +286,8 @@ disabled={room.status !== 'connected'}
         />
       ) : null}
 
-      <nav className="grid grid-cols-3 border-t border-border bg-card/90 pb-[max(0.4rem,env(safe-area-inset-bottom))] lg:hidden">
+      {desktop ? null : <FollowLinks />}
+      <nav className="grid grid-cols-3 border-t border-gold/30 bg-burgundy/90 pb-[max(0.4rem,env(safe-area-inset-bottom))] lg:hidden">
         <PaneButton current={pane} id="video" onSelect={setPane}>
           วิดีโอ
         </PaneButton>

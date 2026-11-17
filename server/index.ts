@@ -6,7 +6,18 @@ import { fileURLToPath } from 'node:url'
 import busboy from 'busboy'
 import express, { type Request, type Response } from 'express'
 import { Server, type Socket } from 'socket.io'
-import { accountFromToken, cleanNickname, cleanPassword, loginAccount, logoutToken, nicknameKey, registerAccount } from './auth.ts'
+import {
+  accountFromToken,
+  cleanNickname,
+  cleanPassword,
+  ensureSiteOwner,
+  grantSiteOwnerRoom,
+  isSiteOwnerAccount,
+  loginAccount,
+  logoutToken,
+  nicknameKey,
+  registerAccount,
+} from './auth.ts'
 import {
   addBan,
   countDjTracks,
@@ -321,7 +332,17 @@ const rooms = new Map<string, LiveRoom>()
 const lastChatAt = new Map<string, number>()
 
 function ensureRoomRecord(roomId: string, ownerAccountId: string | null) {
-  if (!getRoom(roomId)) insertRoom(roomId, ownerAccountId)
+  if (!getRoom(roomId)) {
+    insertRoom(roomId, ownerAccountId)
+    grantSiteOwnerRoom(roomId)
+  }
+}
+
+function canCommand(actor: LiveUser, target: LiveUser) {
+  if (actor.accountId && target.accountId && actor.accountId === target.accountId) return false
+  if (isSiteOwnerAccount(target.accountId)) return false
+  if (isSiteOwnerAccount(actor.accountId)) return true
+  return outranks(actor.rank, target.rank)
 }
 
 function openLive(roomId: string) {
@@ -442,7 +463,12 @@ function syncAccountUser(roomId: string, user: LiveUser) {
   const room = getRoom(roomId)
   const member = getMember(roomId, user.accountId)
   if (!room || !member || !isRankId(member.rank)) return
-  user.rank = room.owner_account_id === user.accountId ? 'owner' : member.rank
+  if (isSiteOwnerAccount(user.accountId)) {
+    user.rank = 'owner'
+    if (member.rank !== 'owner') updateMemberRank(roomId, user.accountId, 'owner')
+  } else {
+    user.rank = room.owner_account_id === user.accountId ? 'owner' : member.rank
+  }
   user.nameColor = member.name_color
   user.textMuted = member.text_muted === 1
   user.micMuted = member.mic_muted === 1
@@ -581,6 +607,7 @@ function roomStatePayload(socket: AppSocket, roomId: string, live: LiveRoom, use
 }
 
 async function main() {
+  ensureSiteOwner()
   const app = express()
   const httpServer = createServer(app)
   const io: AppServer = new Server(httpServer, {
@@ -674,6 +701,7 @@ async function main() {
       return
     }
     insertRoom(roomId, account.id)
+    grantSiteOwnerRoom(roomId)
     res.status(201).json({ roomId })
   })
 
@@ -775,7 +803,7 @@ async function main() {
       if (account && roomRow) {
         let member = getMember(roomId, account.id)
         if (!member) {
-          rank = roomRow.owner_account_id === account.id ? 'owner' : 'member'
+          rank = isSiteOwnerAccount(account.id) || roomRow.owner_account_id === account.id ? 'owner' : 'member'
           member = {
             room_id: roomId,
             account_id: account.id,
@@ -789,7 +817,16 @@ async function main() {
           }
           upsertMember(member)
         }
-        rank = roomRow.owner_account_id === account.id ? 'owner' : isRankId(member.rank) ? member.rank : 'member'
+        rank =
+          isSiteOwnerAccount(account.id) || roomRow.owner_account_id === account.id
+            ? 'owner'
+            : isRankId(member.rank)
+              ? member.rank
+              : 'member'
+        if (isSiteOwnerAccount(account.id) && member.rank !== 'owner') {
+          updateMemberRank(roomId, account.id, 'owner')
+          member.rank = 'owner'
+        }
         nameColor = member.name_color
         textMuted = member.text_muted === 1
         micMuted = member.mic_muted === 1
@@ -936,7 +973,7 @@ async function main() {
         socket.emit('mod-error', { message: 'ตั้งยศได้เฉพาะคนที่มีบัญชี' })
         return
       }
-      if (!outranks(context.user.rank, target.rank) || rankLevel(rank) > rankLevel(context.user.rank)) {
+      if (!canCommand(context.user, target) || rankLevel(rank) > rankLevel(context.user.rank)) {
         socket.emit('mod-error', { message: 'ตั้งยศให้คนที่ยศสูงกว่าหรือเท่ากันไม่ได้' })
         return
       }
@@ -959,7 +996,7 @@ async function main() {
       }
       const target = [...context.live.participants.values()].find((person) => person.accountId === payload?.accountId)
       const samePerson = target?.socketId === socket.id
-      if (!target?.accountId || (!samePerson && !outranks(context.user.rank, target.rank))) {
+      if (!target?.accountId || (!samePerson && !canCommand(context.user, target))) {
         socket.emit('mod-error', { message: 'ตั้งสีชื่อให้คนนี้ไม่ได้' })
         return
       }
@@ -1012,7 +1049,7 @@ async function main() {
         return
       }
       const target = [...context.live.participants.values()].find((person) => person.accountId === payload?.accountId)
-      if (!target || !outranks(context.user.rank, target.rank)) {
+      if (!target || !canCommand(context.user, target)) {
         socket.emit('mod-error', { message: 'สั่งคนนี้ไม่ได้' })
         return
       }
@@ -1067,7 +1104,7 @@ async function main() {
       const targetId = payload?.socketId
       if (!targetId || targetId === socket.id) return
       const target = context.live.participants.get(targetId)
-      if (!target || !outranks(context.user.rank, target.rank)) {
+      if (!target || !canCommand(context.user, target)) {
         socket.emit('mod-error', { message: 'เตะคนนี้ไม่ได้' })
         return
       }
@@ -1094,7 +1131,7 @@ async function main() {
       const targetId = payload?.socketId
       if (!targetId || targetId === socket.id) return
       const target = context.live.participants.get(targetId)
-      if (!target || !outranks(context.user.rank, target.rank)) {
+      if (!target || !canCommand(context.user, target)) {
         socket.emit('mod-error', { message: 'แบนคนนี้ไม่ได้' })
         return
       }
@@ -1153,7 +1190,7 @@ async function main() {
       if (!room) return
       if (room.owner_account_id && room.owner_account_id !== context.user.accountId) {
         const previous = getMember(context.roomId, room.owner_account_id)
-        if (previous) updateMemberRank(context.roomId, room.owner_account_id, 'admin')
+        if (previous && !isSiteOwnerAccount(room.owner_account_id)) updateMemberRank(context.roomId, room.owner_account_id, 'admin')
         const previousLive = findLiveByAccount(context.live, room.owner_account_id)
         if (previousLive) syncAccountUser(context.roomId, previousLive)
       }
