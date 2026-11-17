@@ -18,6 +18,7 @@ import {
   nicknameKey,
   registerAccount,
 } from './auth.ts'
+import { NewsFeed, newsConfig } from './news.ts'
 import { PriceFeed, type PriceBoard } from './prices.ts'
 import {
   addBan,
@@ -221,6 +222,7 @@ type ServerToClient = {
   'screen-chunk': (payload: { id: string; gen: number; seq: number; mime: string; chunk: Buffer }) => void
   'screen-end': (payload: { id: string; gen: number }) => void
   prices: (payload: PriceBoard) => void
+  'news-posts': (payload: { id: string; text: string; createdAt: string; url: string }[]) => void
   'participant-joined': (participant: PublicParticipant) => void
   'participant-left': (payload: { id: string }) => void
   'participant-updated': (participant: PublicParticipant) => void
@@ -696,6 +698,15 @@ async function main() {
   })
   prices.start()
 
+  const news = new NewsFeed((posts) => {
+    io.emit('news-posts', posts)
+  })
+  news.start()
+
+  app.get('/api/news', (_req, res) => {
+    res.json({ ...newsConfig(), posts: news.posts })
+  })
+
   app.get('/api/prices', (_req, res) => {
     const board = prices.snapshot()
     if (!board) {
@@ -859,6 +870,7 @@ async function main() {
   io.on('connection', (socket) => {
     const board = prices.snapshot()
     if (board) socket.emit('prices', board)
+    if (news.posts.length > 0) socket.emit('news-posts', news.posts)
     socket.on('join', (payload) => {
       const roomId = cleanRoomId(payload?.roomId)
       const account = accountFromToken(payload?.token)
