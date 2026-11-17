@@ -1,10 +1,24 @@
-export type PriceSymbol = 'BTC' | 'ETH' | 'SOL'
+export type PriceSymbol =
+  | 'BTC'
+  | 'ETH'
+  | 'SOL'
+  | 'AVAX'
+  | 'NEAR'
+  | 'INJ'
+  | 'ZEC'
+  | 'DOGE'
+  | 'ADA'
+  | 'XRP'
+  | 'WLD'
+  | 'UNI'
+  | 'XAU'
 
 export type PriceQuote = {
   symbol: PriceSymbol
   usd: number
   thb: number | null
   changePct: number
+  spark: number[]
 }
 
 export type PriceBoard = {
@@ -14,13 +28,23 @@ export type PriceBoard = {
   live: boolean
 }
 
-const PAIRS: { symbol: PriceSymbol; pair: string }[] = [
-  { symbol: 'BTC', pair: 'BTCUSDT' },
-  { symbol: 'ETH', pair: 'ETHUSDT' },
-  { symbol: 'SOL', pair: 'SOLUSDT' },
+const PAIRS: { symbol: PriceSymbol; pair: string; gecko: string }[] = [
+  { symbol: 'BTC', pair: 'BTCUSDT', gecko: 'bitcoin' },
+  { symbol: 'ETH', pair: 'ETHUSDT', gecko: 'ethereum' },
+  { symbol: 'SOL', pair: 'SOLUSDT', gecko: 'solana' },
+  { symbol: 'AVAX', pair: 'AVAXUSDT', gecko: 'avalanche-2' },
+  { symbol: 'NEAR', pair: 'NEARUSDT', gecko: 'near' },
+  { symbol: 'INJ', pair: 'INJUSDT', gecko: 'injective-protocol' },
+  { symbol: 'ZEC', pair: 'ZECUSDT', gecko: 'zcash' },
+  { symbol: 'DOGE', pair: 'DOGEUSDT', gecko: 'dogecoin' },
+  { symbol: 'ADA', pair: 'ADAUSDT', gecko: 'cardano' },
+  { symbol: 'XRP', pair: 'XRPUSDT', gecko: 'ripple' },
+  { symbol: 'WLD', pair: 'WLDUSDT', gecko: 'worldcoin-wld' },
+  { symbol: 'UNI', pair: 'UNIUSDT', gecko: 'uniswap' },
+  { symbol: 'XAU', pair: 'PAXGUSDT', gecko: 'pax-gold' },
 ]
 
-const STREAM = 'btcusdt@ticker/ethusdt@ticker/solusdt@ticker/usdtthb@ticker'
+const STREAM = [...PAIRS.map((item) => `${item.pair.toLowerCase()}@ticker`), 'usdtthb@ticker'].join('/')
 const WS_URLS = [
   `wss://data-stream.binance.vision/stream?streams=${STREAM}`,
   `wss://stream.binance.com:9443/stream?streams=${STREAM}`,
@@ -30,7 +54,7 @@ const REST_URLS = [
   'https://api.binance.com/api/v3/ticker/24hr?symbols=',
 ]
 
-type QuoteDraft = { usd: number; changePct: number }
+type QuoteDraft = { usd: number; changePct: number; spark: number[] }
 
 export class PriceFeed {
   private quotes = new Map<PriceSymbol, QuoteDraft>()
@@ -46,6 +70,8 @@ export class PriceFeed {
   private backoff = 1000
   private closed = false
   private lastBroadcast = 0
+  private broadcastTimer: ReturnType<typeof setInterval> | null = null
+  private dirty = false
   private onBoard: (board: PriceBoard) => void
 
   constructor(onBoard: (board: PriceBoard) => void) {
@@ -59,6 +85,16 @@ export class PriceFeed {
       if (this.live && Date.now() - this.updatedAt < 15_000) return
       void this.pollRest()
     }, 10_000)
+    this.broadcastTimer = setInterval(() => {
+      if (!this.dirty) return
+      this.dirty = false
+      for (const quote of this.quotes.values()) {
+        if (quote.spark[quote.spark.length - 1] === quote.usd) continue
+        quote.spark.push(quote.usd)
+        if (quote.spark.length > 30) quote.spark.shift()
+      }
+      this.publish(true)
+    }, 1000)
     void this.refreshThb()
     void this.pollRest()
   }
@@ -67,6 +103,7 @@ export class PriceFeed {
     this.closed = true
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     if (this.pollTimer) clearInterval(this.pollTimer)
+    if (this.broadcastTimer) clearInterval(this.broadcastTimer)
     this.socket?.close()
   }
 
@@ -86,6 +123,7 @@ export class PriceFeed {
           usd: quote.usd,
           thb: this.thbRate ? quote.usd * this.thbRate : null,
           changePct: quote.changePct,
+          spark: quote.spark.slice(-24),
         },
       ]
     })
@@ -102,7 +140,7 @@ export class PriceFeed {
     const board = this.board()
     if (!board) return
     const now = Date.now()
-    if (!force && now - this.lastBroadcast < 800) return
+    if (!force && now - this.lastBroadcast < 1000) return
     this.lastBroadcast = now
     this.onBoard(board)
   }
@@ -111,7 +149,8 @@ export class PriceFeed {
     this.source = source
     this.live = live
     this.updatedAt = Date.now()
-    this.publish()
+    this.dirty = true
+    if (this.quotes.size > 0 && this.lastBroadcast === 0) this.publish(true)
   }
 
   private applyTicker(symbol: string, last: string, change: string) {
@@ -124,7 +163,8 @@ export class PriceFeed {
     }
     const match = PAIRS.find((item) => item.pair === symbol)
     if (!match || !Number.isFinite(changePct)) return
-    this.quotes.set(match.symbol, { usd, changePct })
+    const previous = this.quotes.get(match.symbol)
+    this.quotes.set(match.symbol, { usd, changePct, spark: previous?.spark ?? [] })
   }
 
   private connect() {
@@ -201,7 +241,7 @@ export class PriceFeed {
 
   private async pollBinance() {
     try {
-      const symbols = encodeURIComponent('["BTCUSDT","ETHUSDT","SOLUSDT","USDTTHB"]')
+      const symbols = encodeURIComponent(JSON.stringify([...PAIRS.map((item) => item.pair), 'USDTTHB']))
       let response: Response | null = null
       for (const base of REST_URLS) {
         const attempt = await fetch(`${base}${symbols}`)
@@ -229,17 +269,17 @@ export class PriceFeed {
 
   private async pollCoinGecko() {
     try {
+      const ids = PAIRS.map((item) => item.gecko).join(',')
       const response = await fetch(
-        'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd,thb&include_24hr_change=true',
+        `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,thb&include_24hr_change=true`,
       )
       if (!response.ok) return
       const body = (await response.json()) as Record<string, { usd?: number; thb?: number; usd_24h_change?: number }>
-      const map: Record<string, PriceSymbol> = { bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL' }
       let rate: number | null = null
-      for (const [id, symbol] of Object.entries(map)) {
-        const row = body[id]
+      for (const item of PAIRS) {
+        const row = body[item.gecko]
         if (!row?.usd || !Number.isFinite(row.usd)) continue
-        this.quotes.set(symbol, { usd: row.usd, changePct: row.usd_24h_change ?? 0 })
+        this.applyTicker(item.pair, String(row.usd), String(row.usd_24h_change ?? 0))
         if (row.thb && row.usd > 0) rate = row.thb / row.usd
       }
       if (rate) this.thbRate = rate
