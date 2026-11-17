@@ -93,20 +93,20 @@ test('two people exchange text and media', async ({ browser }) => {
   await arm.getByRole('button', { name: 'ส่ง' }).click()
   await expect(mint.getByText('ได้ยินไหม')).toBeVisible()
 
-  const remoteVideo = mint.locator('[data-testid="video-tile"][data-self="false"] video')
-  await expect.poll(async () => remoteVideo.evaluate((el: HTMLVideoElement) => el.videoWidth)).toBeGreaterThan(0)
-  await expect
-    .poll(async () =>
-      remoteVideo.evaluate((el: HTMLVideoElement) => {
-        const media = el.srcObject
-        if (!(media instanceof MediaStream)) return false
-        return media.getAudioTracks().some((track) => track.readyState === 'live' && !track.muted)
-      }),
-    )
-    .toBe(true)
-
-  const localVideo = mint.locator('[data-testid="video-tile"][data-self="true"] video')
-  await expect.poll(async () => localVideo.evaluate((el: HTMLVideoElement) => el.videoWidth)).toBeGreaterThan(0)
+  await expect(mint.getByTestId('toggle-cam')).toHaveCount(0)
+  await expect(mint.getByTestId('room-capacity')).toContainText('/200')
+  const remoteAudio = arm.locator('[data-testid="remote-audio"]')
+  await expect(remoteAudio).toBeAttached()
+  await expect.poll(async () => remoteAudio.evaluate((el: HTMLAudioElement) => el.dataset.live === 'true')).toBe(true)
+  await expect(arm.locator('[data-testid="video-tile"][data-self="false"]')).toBeVisible()
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mP8z8BQz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC',
+    'base64',
+  )
+  await mint.getByTestId('avatar-file').setInputFiles({ name: 'face.png', mimeType: 'image/png', buffer: png })
+  await expect(mint.locator('[data-testid="participant"][data-self="true"] img')).toBeVisible()
+  await expect(arm.locator('[data-testid="participant"]').filter({ hasText: 'มิ้นท์' }).locator('img')).toBeVisible()
+  await mint.screenshot({ path: `${ARTIFACTS}/screenshot_avatars.png` })
 
   await mint.getByTestId('open-admin').click()
   const armRow = mint.getByTestId('admin-person').filter({ hasText: 'อาร์ม' })
@@ -130,6 +130,22 @@ test('two people exchange text and media', async ({ browser }) => {
   await expect
     .poll(async () => arm.getByTestId('dj-audio').evaluate((el: HTMLAudioElement) => el.currentTime))
     .toBeGreaterThan(0.05)
+  await expect(mint.getByTestId('dj-visualizer')).toHaveAttribute('data-mode', 'console')
+  await expect
+    .poll(async () =>
+      mint.getByTestId('dj-visualizer').evaluate((canvas: HTMLCanvasElement) => {
+        const context = canvas.getContext('2d')
+        if (!context) return 0
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+        let lit = 0
+        for (let index = 0; index < pixels.length; index += 16) {
+          if ((pixels[index] ?? 0) + (pixels[index + 1] ?? 0) + (pixels[index + 2] ?? 0) > 80) lit += 1
+        }
+        return lit
+      }),
+    )
+    .toBeGreaterThan(8)
+  await mint.getByTestId('dj-player').screenshot({ path: `${ARTIFACTS}/screenshot_dj_visualizer.png` })
   await mint.screenshot({ path: `${ARTIFACTS}/screenshot_dj_player.png` })
 
   await mint.getByTestId('open-admin').click()
@@ -141,13 +157,10 @@ test('two people exchange text and media', async ({ browser }) => {
   await expect(arm.locator('[data-testid="video-tile"][data-self="false"]')).toHaveAttribute('data-audio', 'false')
   await expect(arm.getByLabel('ไมค์ปิด').first()).toBeVisible()
 
-  await mint.getByRole('button', { name: 'ปิดกล้อง' }).click()
-  await expect(arm.locator('[data-testid="video-tile"][data-self="false"]')).toHaveAttribute('data-video', 'false')
-
   await mint.screenshot({ path: `${ARTIFACTS}/screenshot_room_desktop.png` })
 
   await arm.setViewportSize({ width: 390, height: 844 })
-  await arm.getByRole('button', { name: 'วิดีโอ' }).click()
+  await arm.getByRole('button', { name: 'เวที' }).click()
   await expect(arm.locator('[data-testid="video-tile"][data-self="false"]')).toBeVisible()
   await arm.screenshot({ path: `${ARTIFACTS}/screenshot_room_mobile.png` })
 
@@ -188,11 +201,7 @@ test('permission denial still allows text chat', async ({ browser }) => {
   await expect(mint.getByText('พิมพ์ได้อย่างเดียวก็ได้')).toBeVisible()
   await expect(mint.getByTestId('chat-message').filter({ hasText: 'พิมพ์ได้อย่างเดียวก็ได้' })).toContainText('อาร์ม')
 
-  await expect
-    .poll(async () =>
-      arm.locator('[data-testid="video-tile"][data-self="false"] video').evaluate((el: HTMLVideoElement) => el.videoWidth),
-    )
-    .toBeGreaterThan(0)
+  await expect(arm.locator('[data-testid="video-tile"][data-self="false"]')).toBeVisible()
 
   await arm.screenshot({ path: `${ARTIFACTS}/screenshot_permission_denied.png` })
   await host.close()
@@ -221,8 +230,8 @@ test('screen share reaches the other person', async ({ browser }) => {
   await expect(arm.getByTestId('screen-live')).toContainText('กำลังแชร์จอ')
   await expect(arm.getByTestId('screen-sharer')).toHaveText('มิ้นท์')
   await expect(arm.getByTestId('screen-fullscreen')).toBeVisible()
-  await expect(arm.getByTestId('camera-strip').locator('[data-testid="video-tile"][data-self="false"]')).toBeVisible()
-  await expect(arm.getByTestId('camera-strip').locator('[data-testid="video-tile"][data-sharing="true"]')).toBeVisible()
+  await expect(arm.getByTestId('avatar-grid').locator('[data-testid="video-tile"][data-self="false"]')).toBeVisible()
+  await expect(arm.getByTestId('avatar-grid').locator('[data-testid="video-tile"][data-sharing="true"]')).toBeVisible()
   await expect(arm.getByTestId('participant').filter({ hasText: 'มิ้นท์' })).toHaveAttribute('data-sharing', 'true')
 
   const remoteScreen = stage.locator('video')

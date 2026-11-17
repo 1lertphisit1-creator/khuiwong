@@ -23,6 +23,9 @@ export function AdminPanel({
   onBan,
   onPolicy,
   onClaim,
+  onGrant,
+  onRevoke,
+  onClearAvatar,
 }: {
   people: Participant[]
   selfId: string | null
@@ -44,10 +47,12 @@ export function AdminPanel({
   onBan: (socketId: string) => void
   onPolicy: (policy: RoomPolicy) => void
   onClaim: (secret: string) => void
+  onGrant: (socketId: string) => void
+  onRevoke: (socketId: string) => void
+  onClearAvatar: (accountId: string) => void
 }) {
   const [secret, setSecret] = useState('')
   const [micMin, setMicMin] = useState<RankId>(policy.micMinRank)
-  const [camMin, setCamMin] = useState<RankId>(policy.camMinRank)
   const [screenMin, setScreenMin] = useState<RankId>(policy.screenMinRank)
   const actorLevel = people.find((person) => person.id === selfId)?.rankLevel ?? 0
 
@@ -140,9 +145,6 @@ export function AdminPanel({
                       <Button type="button" size="sm" variant="secondary" onClick={() => onFlag(person.accountId!, 'micBlocked', !person.micBlocked)}>
                         {person.micBlocked ? 'อนุญาตไมค์' : 'ห้ามเปิดไมค์'}
                       </Button>
-                      <Button type="button" size="sm" variant="secondary" onClick={() => onFlag(person.accountId!, 'camBlocked', !person.camBlocked)}>
-                        {person.camBlocked ? 'อนุญาตกล้อง' : 'ห้ามเปิดกล้อง'}
-                      </Button>
                       <Button
                         type="button"
                         size="sm"
@@ -153,6 +155,21 @@ export function AdminPanel({
                         {person.screenBlocked ? 'อนุญาตแชร์จอ' : 'ห้ามแชร์จอ'}
                       </Button>
                     </>
+                  ) : null}
+                  {permissions.mute && lower && person.handRaised && !person.speaker ? (
+                    <Button type="button" size="sm" data-testid="grant-speaker" onClick={() => onGrant(person.id)}>
+                      ให้พูด
+                    </Button>
+                  ) : null}
+                  {permissions.mute && lower && person.speaker ? (
+                    <Button type="button" size="sm" variant="secondary" data-testid="revoke-speaker" onClick={() => onRevoke(person.id)}>
+                      ดึงไมค์
+                    </Button>
+                  ) : null}
+                  {permissions.mute && lower && person.accountId && person.avatarUrl ? (
+                    <Button type="button" size="sm" variant="secondary" data-testid="clear-avatar" onClick={() => onClearAvatar(person.accountId!)}>
+                      ลบรูป
+                    </Button>
                   ) : null}
                   {permissions.kick && lower ? (
                     <Button type="button" size="sm" variant="destructive" data-testid="kick" onClick={() => onKick(person.id)}>
@@ -195,7 +212,7 @@ export function AdminPanel({
             className="mt-6 space-y-3"
             onSubmit={(event) => {
               event.preventDefault()
-              onPolicy({ micMinRank: micMin, camMinRank: camMin, screenMinRank: screenMin })
+              onPolicy({ micMinRank: micMin, camMinRank: policy.camMinRank, screenMinRank: screenMin })
             }}
           >
             <h3 className="font-display text-lg font-bold">ใครเปิดอุปกรณ์ได้</h3>
@@ -205,20 +222,6 @@ export function AdminPanel({
                 className="mt-1 h-10 w-full rounded-xl border border-input bg-ink px-2"
                 value={micMin}
                 onChange={(event) => setMicMin(event.target.value as RankId)}
-              >
-                {RANK_OPTIONS.map((rank) => (
-                  <option key={rank.id} value={rank.id}>
-                    {rank.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              เปิดกล้องได้ตั้งแต่ยศ
-              <select
-                className="mt-1 h-10 w-full rounded-xl border border-input bg-ink px-2"
-                value={camMin}
-                onChange={(event) => setCamMin(event.target.value as RankId)}
               >
                 {RANK_OPTIONS.map((rank) => (
                   <option key={rank.id} value={rank.id}>

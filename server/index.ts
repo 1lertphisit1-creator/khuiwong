@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -58,13 +58,17 @@ import {
 } from './ranks.ts'
 
 const PORT = Number(process.env.PORT) || 4721
-const MAX_PARTICIPANTS = 6
+const MAX_PARTICIPANTS = 200
+const MAX_SPEAKERS = 4
 const MAX_MESSAGES = 200
 const MAX_TRACKS = 20
 const MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 const isProd = process.env.NODE_ENV !== 'development'
 const uploadDir = path.join(dataDir(), 'uploads')
+const avatarDir = path.join(dataDir(), 'avatars')
 mkdirSync(uploadDir, { recursive: true })
+mkdirSync(avatarDir, { recursive: true })
+const avatarVersions = new Map<string, number>()
 
 type IceServer = {
   urls: string | string[]
@@ -91,6 +95,10 @@ type PublicParticipant = {
   micAllowed: boolean
   camAllowed: boolean
   screenAllowed: boolean
+  handRaised: boolean
+  speaker: boolean
+  speaking: boolean
+  avatarUrl: string | null
 }
 
 type ChatMessage = {
@@ -103,6 +111,7 @@ type ChatMessage = {
   rank?: RankId
   rankLabel?: string
   color?: string
+  avatarUrl?: string | null
 }
 
 type LiveUser = {
@@ -120,6 +129,10 @@ type LiveUser = {
   audio: boolean
   video: boolean
   sharing: boolean
+  handRaised: boolean
+  speaker: boolean
+  speaking: boolean
+  raisedAt: number
 }
 
 type LiveRoom = {
@@ -155,6 +168,17 @@ type ClientToServer = {
   signal: (payload: { to?: string; data?: SignalData }) => void
   'media-state': (payload: { audio?: boolean; video?: boolean }) => void
   'screen-state': (payload: { sharing?: boolean }) => void
+  'raise-hand': (payload: { raised?: boolean }) => void
+  'take-slot': () => void
+  'grant-speaker': (payload: { socketId?: string }) => void
+  'revoke-speaker': (payload: { socketId?: string }) => void
+  'voice': (payload: { speaking?: boolean }) => void
+  'mic-chunk': (payload: { gen?: number; seq?: number; mime?: string; chunk?: unknown }) => void
+  'mic-end': (payload: { gen?: number }) => void
+  'screen-chunk': (payload: { gen?: number; seq?: number; mime?: string; chunk?: unknown }) => void
+  'screen-end': (payload: { gen?: number }) => void
+  'clear-avatar': (payload: { accountId?: string }) => void
+  'avatar-refresh': () => void
   'mod-rank': (payload: { accountId?: string; rank?: string }) => void
   'mod-color': (payload: { accountId?: string; color?: string | null }) => void
   'mod-rank-color': (payload: { rank?: string; color?: string }) => void
@@ -189,7 +213,12 @@ type ServerToClient = {
     rankColors: Record<RankId, string>
     dj: DjSnapshot
     ownerSecretEnabled: boolean
+    caps: { people: number; speakers: number }
   }) => void
+  'mic-chunk': (payload: { id: string; gen: number; seq: number; mime: string; chunk: Buffer }) => void
+  'mic-end': (payload: { id: string; gen: number }) => void
+  'screen-chunk': (payload: { id: string; gen: number; seq: number; mime: string; chunk: Buffer }) => void
+  'screen-end': (payload: { id: string; gen: number }) => void
   'participant-joined': (participant: PublicParticipant) => void
   'participant-left': (payload: { id: string }) => void
   'participant-updated': (participant: PublicParticipant) => void
@@ -368,6 +397,33 @@ function canUseMic(live: LiveRoom, user: LiveUser) {
   return rankLevel(user.rank) >= rankLevel(live.policy.micMinRank)
 }
 
+function speakerCount(live: LiveRoom) {
+  let count = 0
+  for (const user of live.participants.values()) if (user.speaker) count += 1
+  return count
+}
+
+function avatarFile(accountId: string) {
+  return path.join(avatarDir, `${accountId}.webp`)
+}
+
+function avatarUrlFor(accountId: string | null) {
+  if (!accountId || !/^[A-Za-z0-9_-]{8,64}$/.test(accountId)) return null
+  let version = avatarVersions.get(accountId)
+  if (version === undefined) {
+    const file = avatarFile(accountId)
+    if (!existsSync(file)) version = 0
+    else version = Math.floor(statSync(file).mtimeMs)
+    avatarVersions.set(accountId, version)
+  }
+  if (!version) return null
+  return `/api/avatars/${accountId}?v=${version}`
+}
+
+function isWebp(buf: Buffer) {
+  return buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP'
+}
+
 function canUseCam(live: LiveRoom, user: LiveUser) {
   if (user.camBlocked) return false
   return rankLevel(user.rank) >= rankLevel(live.policy.camMinRank)
@@ -404,6 +460,10 @@ function toPublic(live: LiveRoom, user: LiveUser): PublicParticipant {
     micAllowed: canUseMic(live, user),
     camAllowed: canUseCam(live, user),
     screenAllowed: canShare(live, user),
+    handRaised: user.handRaised && !user.speaker,
+    speaker: user.speaker,
+    speaking: user.speaking && user.speaker && user.audio,
+    avatarUrl: avatarUrlFor(user.accountId),
   }
 }
 
@@ -602,8 +662,9 @@ function roomStatePayload(socket: AppSocket, roomId: string, live: LiveRoom, use
     policy: live.policy,
     rankColors: live.rankColors,
     dj: djSnapshot(roomId),
-    ownerSecretEnabled: Boolean(process.env.OWNER_SECRET),
-  }
+      ownerSecretEnabled: Boolean(process.env.OWNER_SECRET),
+      caps: { people: MAX_PARTICIPANTS, speakers: MAX_SPEAKERS },
+    }
 }
 
 async function main() {
@@ -677,6 +738,42 @@ async function main() {
     if (token) logoutToken(token)
     res.json({ ok: true })
   })
+
+  app.get('/api/avatars/:accountId', (req, res) => {
+    const accountId = req.params.accountId
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(accountId)) {
+      res.status(404).end()
+      return
+    }
+    const file = avatarFile(accountId)
+    if (!existsSync(file)) {
+      res.status(404).end()
+      return
+    }
+    res.setHeader('Content-Type', 'image/webp')
+    res.setHeader('Cache-Control', 'public, max-age=86400')
+    createReadStream(file).pipe(res)
+  })
+
+  app.post(
+    '/api/account/avatar',
+    express.raw({ type: 'image/webp', limit: '400kb' }),
+    (req, res) => {
+      const account = accountFromToken(bearer(req))
+      if (!account) {
+        res.status(401).json({ message: 'เข้าสู่ระบบก่อนอัปโหลดรูป' })
+        return
+      }
+      const body = req.body
+      if (!Buffer.isBuffer(body) || !isWebp(body)) {
+        res.status(400).json({ message: 'ส่งรูปเป็น webp สี่เหลี่ยม ไม่เกิน 400 KB' })
+        return
+      }
+      writeFileSync(avatarFile(account.id), body)
+      avatarVersions.set(account.id, Date.now())
+      res.json({ avatarUrl: avatarUrlFor(account.id) })
+    },
+  )
 
   app.get('/api/me', (req, res) => {
     const account = accountFromToken(bearer(req))
@@ -788,7 +885,7 @@ async function main() {
 
       const already = live.participants.get(socket.id)
       if (!already && live.participants.size >= MAX_PARTICIPANTS) {
-        socket.emit('room-error', { message: 'ห้องนี้เต็มแล้ว รองรับได้สูงสุด 6 คน' })
+        socket.emit('room-error', { message: `ห้องนี้เต็มแล้ว รองรับได้สูงสุด ${MAX_PARTICIPANTS} คน` })
         return
       }
 
@@ -848,10 +945,19 @@ async function main() {
         screenBlocked,
         guestKey,
         audio: Boolean(payload?.audio),
-        video: Boolean(payload?.video),
+        video: false,
         sharing: false,
+        handRaised: false,
+        speaker: false,
+        speaking: false,
+        raisedAt: 0,
       }
       enforceMedia(live, user)
+      const hostSeat =
+        (user.rank === 'owner' || isSiteOwnerAccount(user.accountId)) &&
+        canUseMic(live, user) &&
+        speakerCount(live) < MAX_SPEAKERS
+      if (hostSeat) user.speaker = true
       live.participants.set(socket.id, user)
       socket.data.roomId = roomId
       socket.data.name = name
@@ -895,6 +1001,7 @@ async function main() {
           rank: context.user.rank,
           rankLabel: rankLabel(context.user.rank),
           color: view.color,
+          avatarUrl: view.avatarUrl,
         }),
       )
     })
@@ -947,6 +1054,160 @@ async function main() {
           textMuted: view.textMuted,
         })
       }
+    })
+
+    socket.on('raise-hand', (payload) => {
+      const context = actorContext(socket)
+      if (!context) return
+      if (context.user.speaker) return
+      const raised = Boolean(payload?.raised) && canUseMic(context.live, context.user)
+      context.user.handRaised = raised
+      context.user.raisedAt = raised ? Date.now() : 0
+      broadcastUser(io, context.roomId, context.live, context.user)
+      if (raised) {
+        pushMessage(
+          io,
+          context.roomId,
+          context.live,
+          makeMessage('system', `${context.user.name} ขอพูด`, context.user.name),
+        )
+      }
+    })
+
+    socket.on('take-slot', () => {
+      const context = actorContext(socket)
+      if (!context) return
+      if (context.user.speaker) return
+      if (!canUseMic(context.live, context.user) || rankLevel(context.user.rank) < rankLevel('moderator')) {
+        socket.emit('mod-error', { message: 'ยศนี้ยังขึ้นพูดเองไม่ได้ ขอพูดแล้วรอผู้ดูแล' })
+        return
+      }
+      if (speakerCount(context.live) >= MAX_SPEAKERS) {
+        socket.emit('mod-error', { message: 'ไมค์เต็มแล้ว' })
+        return
+      }
+      context.user.speaker = true
+      context.user.handRaised = false
+      broadcastUser(io, context.roomId, context.live, context.user)
+      pushMessage(
+        io,
+        context.roomId,
+        context.live,
+        makeMessage('system', `${context.user.name} ขึ้นพูด`, context.user.name),
+      )
+    })
+
+    socket.on('grant-speaker', (payload) => {
+      const context = actorContext(socket)
+      if (!context || !permissionsFor(context.user.rank).mute) return
+      const target = context.live.participants.get(payload?.socketId ?? '')
+      if (!target || !canCommand(context.user, target)) {
+        socket.emit('mod-error', { message: 'ให้คนนี้พูดไม่ได้' })
+        return
+      }
+      if (!canUseMic(context.live, target)) {
+        socket.emit('mod-error', { message: 'คนนี้ถูกจำกัดไมค์' })
+        return
+      }
+      if (!target.speaker && speakerCount(context.live) >= MAX_SPEAKERS) {
+        socket.emit('mod-error', { message: 'ไมค์เต็มแล้ว' })
+        return
+      }
+      target.speaker = true
+      target.handRaised = false
+      broadcastUser(io, context.roomId, context.live, target)
+      pushMessage(
+        io,
+        context.roomId,
+        context.live,
+        makeMessage('system', `${context.user.name} ให้${target.name}พูด`, context.user.name),
+      )
+    })
+
+    socket.on('revoke-speaker', (payload) => {
+      const context = actorContext(socket)
+      if (!context || !permissionsFor(context.user.rank).mute) return
+      const target = context.live.participants.get(payload?.socketId ?? '')
+      if (!target || !canCommand(context.user, target)) return
+      target.speaker = false
+      target.audio = false
+      target.speaking = false
+      broadcastUser(io, context.roomId, context.live, target)
+      io.to(context.roomId).emit('mic-end', { id: target.socketId, gen: 0 })
+    })
+
+    socket.on('voice', (payload) => {
+      const context = actorContext(socket)
+      if (!context?.user.speaker) return
+      const speaking = Boolean(payload?.speaking) && context.user.audio
+      if (context.user.speaking === speaking) return
+      context.user.speaking = speaking
+      io.to(context.roomId).emit('participant-updated', toPublic(context.live, context.user))
+    })
+
+    socket.on('mic-chunk', (payload) => {
+      const context = actorContext(socket)
+      const chunk = chunkBuffer(payload?.chunk)
+      if (!context?.user.speaker || !context.user.audio || !chunk) return
+      socket.volatile.to(context.roomId).emit('mic-chunk', {
+        id: socket.id,
+        gen: Number(payload?.gen) || 0,
+        seq: Number(payload?.seq) || 0,
+        mime: typeof payload?.mime === 'string' ? payload.mime.slice(0, 80) : 'audio/webm;codecs=opus',
+        chunk,
+      })
+    })
+
+    socket.on('mic-end', (payload) => {
+      const context = actorContext(socket)
+      if (!context) return
+      socket.to(context.roomId).emit('mic-end', { id: socket.id, gen: Number(payload?.gen) || 0 })
+    })
+
+    socket.on('screen-chunk', (payload) => {
+      const context = actorContext(socket)
+      const chunk = chunkBuffer(payload?.chunk)
+      if (!context?.user.sharing || !chunk) return
+      socket.volatile.to(context.roomId).emit('screen-chunk', {
+        id: socket.id,
+        gen: Number(payload?.gen) || 0,
+        seq: Number(payload?.seq) || 0,
+        mime: typeof payload?.mime === 'string' ? payload.mime.slice(0, 80) : 'video/webm;codecs=vp8',
+        chunk,
+      })
+    })
+
+    socket.on('screen-end', (payload) => {
+      const context = actorContext(socket)
+      if (!context) return
+      socket.to(context.roomId).emit('screen-end', { id: socket.id, gen: Number(payload?.gen) || 0 })
+    })
+
+    socket.on('avatar-refresh', () => {
+      const context = actorContext(socket)
+      if (!context?.user.accountId) return
+      avatarVersions.delete(context.user.accountId)
+      broadcastUser(io, context.roomId, context.live, context.user)
+    })
+
+    socket.on('clear-avatar', (payload) => {
+      const context = actorContext(socket)
+      if (!context || !permissionsFor(context.user.rank).mute) return
+      const target = [...context.live.participants.values()].find((person) => person.accountId === payload?.accountId)
+      if (!target?.accountId || !canCommand(context.user, target)) {
+        socket.emit('mod-error', { message: 'ลบรูปคนนี้ไม่ได้' })
+        return
+      }
+      const file = avatarFile(target.accountId)
+      if (existsSync(file)) unlinkSync(file)
+      avatarVersions.set(target.accountId, 0)
+      broadcastUser(io, context.roomId, context.live, target)
+      pushMessage(
+        io,
+        context.roomId,
+        context.live,
+        makeMessage('system', `${context.user.name} ลบรูปของ${target.name}`, context.user.name),
+      )
     })
 
     socket.on('signal', (payload) => {
@@ -1061,7 +1322,12 @@ async function main() {
       }
       if (flag === 'micBlocked') {
         target.micBlocked = value
-        if (value) target.audio = false
+        if (value) {
+          target.audio = false
+          target.speaker = false
+          target.speaking = false
+          target.handRaised = false
+        }
       }
       if (flag === 'camBlocked') {
         target.camBlocked = value
@@ -1346,6 +1612,15 @@ async function main() {
     console.log(turn ? 'TURN configured' : 'TURN not set — using public STUN only')
     console.log(process.env.OWNER_SECRET ? 'OWNER_SECRET configured' : 'OWNER_SECRET not set')
   })
+}
+
+function chunkBuffer(chunk: unknown) {
+  if (Buffer.isBuffer(chunk)) return chunk.length > 0 && chunk.length <= 512_000 ? chunk : null
+  if (chunk instanceof Uint8Array) {
+    const view = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+    return view.length > 0 && view.length <= 512_000 ? view : null
+  }
+  return null
 }
 
 function randomRoomCode() {

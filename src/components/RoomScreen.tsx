@@ -66,11 +66,9 @@ export function RoomScreen({
 
   const people = useMemo<Participant[]>(() => {
     return room.participants.map((person) =>
-      person.id === room.selfId
-        ? { ...person, audio: room.audioOn, video: room.videoOn, sharing: room.sharing }
-        : person,
+      person.id === room.selfId ? { ...person, audio: room.audioOn, sharing: room.sharing } : person,
     )
-  }, [room.audioOn, room.participants, room.selfId, room.sharing, room.videoOn])
+  }, [room.audioOn, room.participants, room.selfId, room.sharing])
 
   async function retry() {
     setRetrying(true)
@@ -130,6 +128,9 @@ export function RoomScreen({
           <div className="flex items-center gap-1">
             <span data-testid="room-code" className="font-mono text-lg tracking-[0.18em]">
               {entry.code}
+            </span>
+            <span data-testid="room-capacity" className="text-xs text-muted-foreground">
+              {room.participants.length}/{room.caps.people} · ไมค์ {room.caps.speakers}
             </span>
             <Button
               type="button"
@@ -200,34 +201,25 @@ export function RoomScreen({
           <VideoStage
             people={people}
             selfId={room.selfId}
-            remoteStreams={room.remoteStreams}
-            remoteScreens={room.remoteScreens}
-            localStream={stream}
             localScreen={room.screenStream}
             notice={notice}
-          />
-          <DjPlayer
-            roomId={entry.code}
-            dj={room.dj}
-            canControl={room.self.permissions.dj}
-            onPlay={(trackId) => room.send('dj-play', { trackId })}
-            onPause={() => room.send('dj-pause')}
-            onSkip={(direction) => room.send('dj-skip', { direction })}
-            onRemove={(trackId) => room.send('dj-remove', { trackId })}
+            bindMic={room.bindMic}
+            bindScreen={room.bindScreen}
           />
           <ControlBar
             audioOn={room.audioOn}
-            videoOn={room.videoOn}
             sharing={room.sharing}
             hasAudio={room.hasAudio}
-            hasVideo={room.hasVideo}
             micAllowed={room.self.micAllowed}
-            camAllowed={room.self.camAllowed}
             screenAllowed={room.self.screenAllowed}
+            speaker={room.speaker}
+            handRaised={room.handRaised}
+            canTakeSlot={!room.speaker && room.self.permissions.mute && room.self.micAllowed}
             disabled={room.status !== 'connected' || retrying}
             screenNotice={room.screenNotice}
             onToggleAudio={room.toggleAudio}
-            onToggleVideo={room.toggleVideo}
+            onRaiseHand={room.raiseHand}
+            onTakeSlot={room.takeSlot}
             onToggleScreen={() => void room.toggleScreen()}
             onRetry={() => void retry()}
           />
@@ -236,7 +228,18 @@ export function RoomScreen({
         {desktop ? (
           <aside className="flex min-h-0 w-[22.5rem] shrink-0 flex-col border-l border-border">
             <div className="h-[38%] min-h-36 shrink-0 overflow-hidden border-b border-border">
-              <PeoplePanel people={people} selfId={room.selfId} />
+              <PeoplePanel
+                people={people}
+                selfId={room.selfId}
+                onUploadAvatar={async (file) => {
+                  try {
+                    await room.uploadAvatar(file)
+                  } catch (reason) {
+                    setWarning(reason instanceof Error ? reason.message : 'อัปโหลดรูปไม่สำเร็จ')
+                    setWarningOpen(true)
+                  }
+                }}
+              />
             </div>
             <ChatPanel
               messages={room.messages}
@@ -259,7 +262,18 @@ export function RoomScreen({
               />
             </section>
             <section className={cn('min-h-0 flex-1 overflow-hidden', pane !== 'people' && 'hidden')}>
-              <PeoplePanel people={people} selfId={room.selfId} />
+              <PeoplePanel
+                people={people}
+                selfId={room.selfId}
+                onUploadAvatar={async (file) => {
+                  try {
+                    await room.uploadAvatar(file)
+                  } catch (reason) {
+                    setWarning(reason instanceof Error ? reason.message : 'อัปโหลดรูปไม่สำเร็จ')
+                    setWarningOpen(true)
+                  }
+                }}
+              />
             </section>
           </>
         )}
@@ -283,13 +297,25 @@ export function RoomScreen({
           onBan={(socketId) => room.send('mod-ban', { socketId })}
           onPolicy={(next) => room.send('mod-policy', next)}
           onClaim={(secret) => room.send('claim-owner', { secret })}
+          onGrant={(socketId) => room.send('grant-speaker', { socketId })}
+          onRevoke={(socketId) => room.send('revoke-speaker', { socketId })}
+          onClearAvatar={(accountId) => room.send('clear-avatar', { accountId })}
         />
       ) : null}
 
+      <DjPlayer
+        roomId={entry.code}
+        dj={room.dj}
+        canControl={room.self.permissions.dj}
+        onPlay={(trackId) => room.send('dj-play', { trackId })}
+        onPause={() => room.send('dj-pause')}
+        onSkip={(direction) => room.send('dj-skip', { direction })}
+        onRemove={(trackId) => room.send('dj-remove', { trackId })}
+      />
       {desktop ? null : <FollowLinks />}
       <nav className="grid grid-cols-3 border-t border-gold/30 bg-burgundy/90 pb-[max(0.4rem,env(safe-area-inset-bottom))] lg:hidden">
         <PaneButton current={pane} id="video" onSelect={setPane}>
-          วิดีโอ
+          เวที
         </PaneButton>
         <PaneButton current={pane} id="chat" onSelect={setPane} badge={unread}>
           แชต

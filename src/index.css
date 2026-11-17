@@ -101,6 +101,21 @@ select {
     0 24px 70px rgba(0, 0, 0, 0.38);
 }
 
+@keyframes khui-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: khui-marquee 12s linear infinite;
+}
+
 .gold-rule {
   height: 1px;
   border: 0;

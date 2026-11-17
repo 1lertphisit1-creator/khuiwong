@@ -22,6 +22,7 @@ export function DjPlayer({
   onRemove: (trackId: string) => void
 }) {
   const audioRef = useRef<HTMLAudioElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const skewRef = useRef(0)
   const [volume, setVolume] = useState(() => {
     const stored = Number(localStorage.getItem('khuiwong.djVolume'))
@@ -55,6 +56,69 @@ export function DjPlayer({
     }
   }, [dj, volume])
 
+  useEffect(() => {
+    const audio = audioRef.current
+    const canvas = canvasRef.current
+    if (!audio || !canvas) return
+    let stopped = false
+    let frame = 0
+    let context: AudioContext | null = null
+    let source: MediaStreamAudioSourceNode | null = null
+    const draw = canvas.getContext('2d')
+
+    const attach = () => {
+      if (stopped || context) return
+      const capture = (audio as HTMLAudioElement & { captureStream?: () => MediaStream }).captureStream
+      if (!capture) return
+      try {
+        const stream = capture.call(audio)
+        if (stream.getAudioTracks().length === 0) return
+        context = new AudioContext()
+        source = context.createMediaStreamSource(stream)
+        const analyser = context.createAnalyser()
+        analyser.fftSize = 128
+        source.connect(analyser)
+        const bins = new Uint8Array(analyser.frequencyBinCount)
+        const paint = () => {
+          if (stopped || !context) return
+          frame = requestAnimationFrame(paint)
+          if (context.state === 'suspended') void context.resume()
+          analyser.getByteFrequencyData(bins)
+          if (!draw) return
+          const width = canvas.width
+          const height = canvas.height
+          draw.clearRect(0, 0, width, height)
+          const bars = width > 120 ? 24 : 10
+          const gap = 2
+          const barWidth = (width - gap * (bars - 1)) / bars
+          for (let index = 0; index < bars; index += 1) {
+            const value = bins[Math.floor((index / bars) * bins.length)] ?? 0
+            const barHeight = Math.max(2, (value / 255) * height)
+            draw.fillStyle = index % 4 === 0 ? '#f0ddb0' : '#d4b36a'
+            draw.fillRect(index * (barWidth + gap), height - barHeight, barWidth, barHeight)
+          }
+        }
+        paint()
+      } catch {
+        context = null
+      }
+    }
+
+    audio.addEventListener('play', attach)
+    audio.addEventListener('playing', attach)
+    const retry = window.setInterval(attach, 400)
+    attach()
+    return () => {
+      stopped = true
+      window.clearInterval(retry)
+      audio.removeEventListener('play', attach)
+      audio.removeEventListener('playing', attach)
+      cancelAnimationFrame(frame)
+      source?.disconnect()
+      void context?.close()
+    }
+  }, [])
+
   async function upload(file: File | undefined) {
     if (!file) return
     setUploading(true)
@@ -76,15 +140,35 @@ export function DjPlayer({
   }
 
   return (
-    <section data-testid="dj-player" className="border-t border-border bg-ink/80 px-3 py-2">
+    <section data-testid="dj-player" className="border-t border-gold/40 bg-[#2a1218] px-3 py-2">
       <audio ref={audioRef} data-testid="dj-audio" preload="auto" />
       <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] tracking-wide text-muted-foreground">กำลังเปิด</p>
-          <p data-testid="now-playing" className="truncate text-sm font-medium">
-            {dj.track ? dj.track.title : 'ยังไม่มีเพลง'}
-            {dj.playing ? '' : dj.track ? ' · หยุดชั่วคราว' : ''}
-          </p>
+        <canvas
+          ref={canvasRef}
+          width={canControl ? 180 : 88}
+          height={canControl ? 42 : 28}
+          data-testid="dj-visualizer"
+          data-mode={canControl ? 'console' : 'lite'}
+          className="shrink-0 rounded-md bg-ink/80"
+        />
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <p className="text-[11px] tracking-wide text-gold">กำลังเปิด</p>
+          <div className="overflow-hidden">
+            <p
+              data-testid="now-playing"
+              className={cnTitle(Boolean(dj.track && dj.track.title.length > 18))}
+            >
+              <span>
+                {dj.track ? dj.track.title : 'ยังไม่มีเพลง'}
+                {dj.playing ? '' : dj.track ? ' · หยุดชั่วคราว' : ''}
+              </span>
+              {dj.track && dj.track.title.length > 18 ? (
+                <span aria-hidden="true" className="pl-8">
+                  {dj.track.title}
+                </span>
+              ) : null}
+            </p>
+          </div>
         </div>
         {needsGesture ? (
           <Button type="button" size="sm" onClick={() => void audioRef.current?.play().then(() => setNeedsGesture(false))}>
@@ -164,6 +248,12 @@ export function DjPlayer({
       ) : null}
     </section>
   )
+}
+
+function cnTitle(marquee: boolean) {
+  return marquee
+    ? 'marquee-track text-sm font-medium'
+    : 'truncate text-sm font-medium'
 }
 
 function positionSeconds(dj: DjState, skewMs: number) {
