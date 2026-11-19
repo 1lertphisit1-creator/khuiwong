@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { Express, Request, Response } from 'express'
+import express, { type Express, type Request, type Response } from 'express'
 import { accountFromToken, nicknameKey, siteOwnerUsername } from './auth.ts'
 import { activityRankById, activityRankForPosts, ACTIVITY_RANKS, type ActivityRank } from './activityRanks.ts'
 import { parseNameColor, storedHex } from './color.ts'
@@ -262,10 +262,63 @@ export function mountForum(app: Express, io: Hub) {
       res.status(400).json({ message: 'ใส่ลิงก์รูปและลิงก์ปลายทางเป็น http หรือ https' })
       return
     }
+    const enabled = req.body?.enabled === false || req.body?.enabled === 0 ? 0 : 1
     sqlite()
-      .prepare('UPDATE ad_slots SET image_url = ?, link_url = ?, alt_text = ? WHERE slot = ?')
-      .run(imageUrl, linkUrl, alt, slot)
+      .prepare('UPDATE ad_slots SET image_url = ?, link_url = ?, alt_text = ?, enabled = ? WHERE slot = ?')
+      .run(imageUrl, linkUrl, alt, enabled, slot)
+    if (req.body?.clearImage) {
+      sqlite()
+        .prepare(`UPDATE ad_slots SET image_bytes = NULL, image_type = '', image_updated = 0 WHERE slot = ?`)
+        .run(slot)
+    }
     res.json({ slots: listAds() })
+  })
+
+  app.post(
+    '/api/forum/ads/:slot/image',
+    express.raw({
+      limit: '1mb',
+      type: (req) => /^image\/(jpe?g|pjpeg|png|webp|gif)/i.test(String(req.headers['content-type'] ?? '')),
+    }),
+    (req, res) => {
+      if (actorFor(req).rank !== 'owner') {
+        res.status(403).json({ message: 'เฉพาะเจ้าของเว็บตั้งป้ายโฆษณาได้' })
+        return
+      }
+      const slot = Number(req.params.slot)
+      if (!Number.isInteger(slot) || slot < 1 || slot > 5) {
+        res.status(404).json({ message: 'ไม่พบช่องโฆษณานี้' })
+        return
+      }
+      const body = req.body
+      const type = Buffer.isBuffer(body) ? imageMime(body) : null
+      if (!type) {
+        res.status(400).json({ message: 'รองรับเฉพาะ jpg, png, webp และ gif ไม่เกิน 1 MB' })
+        return
+      }
+      sqlite()
+        .prepare('UPDATE ad_slots SET image_bytes = ?, image_type = ?, image_updated = ? WHERE slot = ?')
+        .run(body, type, Date.now(), slot)
+      res.json({ slots: listAds() })
+    },
+  )
+
+  app.get('/api/forum/ads/:slot/image', (req, res) => {
+    const slot = Number(req.params.slot)
+    if (!Number.isInteger(slot) || slot < 1 || slot > 5) {
+      res.status(404).end()
+      return
+    }
+    const row = sqlite().prepare('SELECT image_bytes, image_type FROM ad_slots WHERE slot = ?').get(slot) as
+      | { image_bytes: Buffer | Uint8Array | null; image_type: string }
+      | undefined
+    if (!row?.image_bytes || !row.image_type) {
+      res.status(404).end()
+      return
+    }
+    res.setHeader('Content-Type', row.image_type)
+    res.setHeader('Cache-Control', 'public, max-age=86400')
+    res.send(Buffer.from(row.image_bytes))
   })
 
   app.get('/api/forum/boards/:id', (req, res) => {
@@ -1405,6 +1458,21 @@ function ensureTrafficTables() {
       alt_text TEXT NOT NULL DEFAULT ''
     );
   `)
+  const adColumns = new Set(
+    (sqlite().prepare('PRAGMA table_info(ad_slots)').all() as { name: string }[]).map((column) => column.name),
+  )
+  if (!adColumns.has('enabled')) sqlite().exec('ALTER TABLE ad_slots ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1')
+  if (!adColumns.has('image_bytes')) {
+    sqlite().exec(usingPostgres() ? 'ALTER TABLE ad_slots ADD COLUMN image_bytes BYTEA' : 'ALTER TABLE ad_slots ADD COLUMN image_bytes BLOB')
+  }
+  if (!adColumns.has('image_type')) sqlite().exec(`ALTER TABLE ad_slots ADD COLUMN image_type TEXT NOT NULL DEFAULT ''`)
+  if (!adColumns.has('image_updated')) {
+    sqlite().exec(
+      usingPostgres()
+        ? 'ALTER TABLE ad_slots ADD COLUMN image_updated BIGINT NOT NULL DEFAULT 0'
+        : 'ALTER TABLE ad_slots ADD COLUMN image_updated INTEGER NOT NULL DEFAULT 0',
+    )
+  }
   const insert = sqlite().prepare(
     'INSERT INTO ad_slots (slot, image_url, link_url, alt_text) VALUES (?, ?, ?, ?) ON CONFLICT(slot) DO NOTHING',
   )
@@ -1460,18 +1528,39 @@ function recordPageView(visitor: string, path: string) {
 
 function listAds() {
   const rows = sqlite()
-    .prepare('SELECT slot, image_url, link_url, alt_text FROM ad_slots ORDER BY slot ASC')
-    .all() as { slot: number; image_url: string; link_url: string; alt_text: string }[]
+    .prepare('SELECT slot, image_url, link_url, alt_text, enabled, image_updated FROM ad_slots ORDER BY slot ASC')
+    .all() as {
+    slot: number
+    image_url: string
+    link_url: string
+    alt_text: string
+    enabled: number
+    image_updated: number
+  }[]
   const bySlot = new Map(rows.map((row) => [Number(row.slot), row]))
   return [1, 2, 3, 4, 5].map((slot) => {
     const row = bySlot.get(slot)
+    const updated = Number(row?.image_updated ?? 0)
+    const imageUrl = row?.image_url ?? ''
     return {
       slot,
-      imageUrl: row?.image_url ?? '',
+      imageUrl,
       linkUrl: row?.link_url ?? '',
       alt: row?.alt_text ?? '',
+      enabled: Number(row?.enabled ?? 1) !== 0,
+      hasFile: updated > 0,
+      image: updated > 0 ? `/api/forum/ads/${slot}/image?v=${updated}` : imageUrl,
     }
   })
+}
+
+function imageMime(bytes: Buffer) {
+  if (bytes.length < 12 || bytes.length > 1024 * 1024) return null
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png'
+  if (bytes.toString('ascii', 0, 3) === 'GIF') return 'image/gif'
+  if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
+  return null
 }
 
 function httpUrl(input: unknown) {

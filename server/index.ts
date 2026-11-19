@@ -1807,9 +1807,10 @@ async function main() {
     app.use(vite.middlewares)
   }
 
-  app.use((error: { type?: string }, _req: Request, res: Response, next: (err?: unknown) => void) => {
+  app.use((error: { type?: string }, req: Request, res: Response, next: (err?: unknown) => void) => {
     if (error?.type === 'entity.too.large') {
-      res.status(413).json({ message: 'รูปใหญ่เกิน 2 MB' })
+      const limit = req.path.includes('/ads/') ? '1 MB' : '2 MB'
+      res.status(413).json({ message: `รูปใหญ่เกิน ${limit}` })
       return
     }
     next(error)
