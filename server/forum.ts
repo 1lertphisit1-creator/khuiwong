@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import express, { type Express, type Request, type Response } from 'express'
-import { accountFromToken, nicknameKey, siteOwnerUsername } from './auth.ts'
+import { accountFromToken, isSiteOwnerAccount, nicknameKey, siteOwnerUsername } from './auth.ts'
 import { activityRankById, activityRankForPosts, ACTIVITY_RANKS, type ActivityRank } from './activityRanks.ts'
 import { parseNameColor, storedHex } from './color.ts'
 import {
@@ -256,8 +256,8 @@ export function mountForum(app: Express, io: Hub) {
   })
 
   app.put('/api/forum/ads/:slot', (req, res) => {
-    if (actorFor(req).rank !== 'owner') {
-      res.status(403).json({ message: 'เฉพาะเจ้าของเว็บตั้งป้ายโฆษณาได้' })
+    if (!canManageAds(actorFor(req))) {
+      res.status(403).json({ message: 'เฉพาะเจ้าของหรือผู้ดูแลตั้งป้ายโฆษณาได้' })
       return
     }
     const slot = Number(req.params.slot)
@@ -291,8 +291,8 @@ export function mountForum(app: Express, io: Hub) {
       type: (req) => /^image\/(jpe?g|pjpeg|png|webp|gif)/i.test(String(req.headers['content-type'] ?? '')),
     }),
     (req, res) => {
-      if (actorFor(req).rank !== 'owner') {
-        res.status(403).json({ message: 'เฉพาะเจ้าของเว็บตั้งป้ายโฆษณาได้' })
+      if (!canManageAds(actorFor(req))) {
+        res.status(403).json({ message: 'เฉพาะเจ้าของหรือผู้ดูแลตั้งป้ายโฆษณาได้' })
         return
       }
       const slot = Number(req.params.slot)
@@ -1055,6 +1055,10 @@ function clipText(text: string, max: number) {
   return `${chars.slice(0, max - 1).join('').trimEnd()}…`
 }
 
+function canManageAds(actor: Actor) {
+  return rankLevel(actor.rank) >= rankLevel('admin')
+}
+
 function guestPosting() {
   return setting('guest_posting') === '1'
 }
@@ -1109,6 +1113,7 @@ function identity(accountId: string | null, fallbackName: string) {
   if (member?.rank === 'owner') rank = 'owner'
   const ownerAccount = findAccountByKey(nicknameKey(siteOwnerUsername()))
   if (ownerAccount && ownerAccount.id === accountId) rank = 'owner'
+  if (isSiteOwnerAccount(accountId)) rank = 'owner'
   return {
     accountId,
     name: account?.nickname ?? fallbackName,

@@ -165,14 +165,36 @@ test('owner can moderate and guests stay read-only until allowed', async ({ brow
   await owner.getByTestId('forum-name').fill('Bitcoin')
   await owner.getByTestId('save-names').click()
   await expect(owner.getByTestId('forum-logo')).toHaveText('Bitcoin')
-  await owner.getByTestId('ad-image-1').fill('https://example.com/banner.png')
+  await expect(owner.getByTestId('open-ad-admin')).toBeVisible()
+  await owner.setViewportSize({ width: 390, height: 844 })
+  await owner.getByTestId('open-ad-admin').click()
+  await expect(owner.getByTestId('ad-admin-page')).toBeVisible()
+  await expect(owner.getByText('📷 เลือกรูปจากมือถือ/คอม').first()).toBeVisible()
+  await owner.screenshot({ path: `${ARTIFACTS}/screenshot_admin_ads_390.png`, fullPage: true })
+  await owner.getByTestId('ad-file-1').setInputFiles({
+    name: 'banner.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
+  })
+  await expect(owner.locator('.smf-ad-preview').first()).toBeVisible()
   await owner.getByTestId('ad-link-1').fill('https://example.com/go')
   await owner.getByTestId('ad-alt-1').fill('แบนเนอร์ทดสอบ')
   await owner.getByTestId('ad-save-1').click()
-  await expect(owner.getByText('บันทึกช่อง 1 แล้ว')).toBeVisible()
+  await expect(owner.getByTestId('ad-toast')).toHaveText('บันทึกแล้ว')
   await owner.goto('/')
+  await expect(owner.getByTestId('ad-edit-1')).toBeVisible()
+  await owner.screenshot({ path: `${ARTIFACTS}/screenshot_ad_edit_overlay_390.png`, fullPage: true })
   await expect(owner.getByTestId('ad-slot-1').locator('img')).toHaveAttribute('alt', 'แบนเนอร์ทดสอบ')
-  await expect(owner.getByTestId('ad-slot-2')).toContainText('ป้ายโฆษณาว่าง')
+  await owner.getByTestId('ad-edit-1').click()
+  await expect(owner.getByTestId('ad-admin-page')).toBeVisible()
+  await owner.getByTestId('ad-clear-1').click()
+  await expect(owner.getByTestId('ad-toast')).toHaveText('บันทึกแล้ว')
+  await owner.goto('/')
+  await expect(owner.getByTestId('ad-slot-1')).toContainText('ป้ายโฆษณาว่าง')
+  await owner.setViewportSize({ width: 1360, height: 860 })
   await owner.goto('/admin')
   await expect(owner.getByTestId('appoint-select').locator('option[value="sergeant"]')).toHaveCount(1)
   await owner.getByTestId('appoint-name').fill('นักอ่าน')

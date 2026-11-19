@@ -5,6 +5,7 @@ export type AppRoute =
   | { name: 'login' }
   | { name: 'profile' }
   | { name: 'admin' }
+  | { name: 'ads' }
   | { name: 'help' }
   | { name: 'ranks' }
   | { name: 'search'; query: string }
@@ -19,6 +20,7 @@ export function parseRoute(pathname: string, search = ''): AppRoute {
   if (topic?.[1]) return { name: 'topic', id: Number(topic[1]), page: pageOf(search) }
   if (/^\/(?:login|register)\/?$/.test(pathname)) return { name: 'login' }
   if (/^\/profile\/?$/.test(pathname)) return { name: 'profile' }
+  if (/^\/admin\/ads\/?$/.test(pathname)) return { name: 'ads' }
   if (/^\/admin\/?$/.test(pathname)) return { name: 'admin' }
   if (/^\/help\/?$/.test(pathname)) return { name: 'help' }
   if (/^\/ranks\/?$/.test(pathname)) return { name: 'ranks' }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Crumb } from '@/components/forum/parts.tsx'
+import { go } from '@/lib/route.ts'
 import { AppointRank } from '@/components/forum/Ranks.tsx'
 import { AdAdmin } from '@/components/forum/SiteExtras.tsx'
 import {
@@ -99,6 +100,12 @@ function AdminBox({
     <section className="smf-block" data-testid="forum-admin">
       <div className="smf-cat">Forum admin</div>
       <div className="smf-form-body">
+        <a className="smf-button smf-ad-manage" href="/admin/ads" data-testid="open-ad-admin" onClick={(event) => {
+          event.preventDefault()
+          go('/admin/ads')
+        }}>
+          จัดการป้ายโฆษณา
+        </a>
         <label className="smf-check">
           <input
             type="checkbox"

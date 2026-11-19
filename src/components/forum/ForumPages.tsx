@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BoardIndex } from '@/components/forum/BoardIndex.tsx'
 import { BoardView } from '@/components/forum/BoardView.tsx'
 import { AccountPage, HelpPage, SearchPage } from '@/components/forum/ExtraPages.tsx'
+import { AdAdminPage } from '@/components/forum/SiteExtras.tsx'
 import { RanksPage } from '@/components/forum/Ranks.tsx'
 import { TopicView } from '@/components/forum/TopicView.tsx'
 import type { AppRoute } from '@/lib/route.ts'
@@ -14,6 +15,7 @@ export function ForumPages({ route }: { route: AppRoute }) {
   if (route.name === 'search') return <SearchPage query={route.query} />
   if (route.name === 'help') return <HelpPage />
   if (route.name === 'ranks') return <RanksPage />
+  if (route.name === 'ads') return <AdAdminPage />
   if (route.name === 'admin') {
     return (
       <Suspense fallback={<p className="smf-small">Loading…</p>}>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { forumGet, forumSend } from '@/lib/forum.ts'
-import type { AppRoute } from '@/lib/route.ts'
+import { forumGet, forumSend, type ForumMe } from '@/lib/forum.ts'
+import { go, type AppRoute } from '@/lib/route.ts'
 import { sessionToken } from '@/lib/session.ts'
 
 type ViewTotals = { total: number; today: number }
@@ -54,7 +54,7 @@ export function VisitCounter({ route, online }: { route: AppRoute; online: numbe
   )
 }
 
-export function AdSlots() {
+export function AdSlots({ canEdit = false }: { canEdit?: boolean }) {
   const [slots, setSlots] = useState<AdSlot[] | null>(null)
 
   useEffect(() => {
@@ -69,12 +69,45 @@ export function AdSlots() {
     }
   }, [])
 
+  const visible = (slots ?? emptySlots()).filter((slot) => canEdit || slot.enabled)
   return (
     <section className="smf-ads" data-testid="ad-slots" aria-label="โฆษณา">
-      {(slots ?? emptySlots()).filter((slot) => slot.enabled).map((slot) => (
-        <AdCard key={slot.slot} slot={slot} />
+      {visible.map((slot) => (
+        <AdCard key={slot.slot} slot={slot} canEdit={canEdit} />
       ))}
     </section>
+  )
+}
+
+export function AdAdminPage() {
+  const [me, setMe] = useState<ForumMe | null>(null)
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    void forumGet<{ me: ForumMe }>('/api/forum/bootstrap')
+      .then((payload) => setMe(payload.me))
+      .catch(() => setMe(null))
+      .finally(() => setReady(true))
+  }, [])
+
+  if (!ready) return <p className="smf-small">Loading…</p>
+  const allowed = me?.rank === 'owner' || me?.rank === 'admin'
+  if (!allowed) {
+    return (
+      <div data-testid="ad-admin-denied">
+        <p className="smf-note">เฉพาะเจ้าของหรือผู้ดูแล</p>
+      </div>
+    )
+  }
+  return (
+    <div data-testid="ad-admin-page">
+      <section className="smf-block">
+        <div className="smf-cat">จัดการป้ายโฆษณา</div>
+        <div className="smf-form-body">
+          <AdAdmin />
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -88,6 +121,17 @@ export function AdAdmin() {
       .then((payload) => setSlots(payload.slots))
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'โหลดป้ายไม่สำเร็จ'))
   }, [])
+
+  useEffect(() => {
+    const scroll = () => {
+      const id = window.location.hash.replace('#', '')
+      if (!id) return
+      document.getElementById(id)?.scrollIntoView({ block: 'start' })
+    }
+    scroll()
+    window.addEventListener('popstate', scroll)
+    return () => window.removeEventListener('popstate', scroll)
+  }, [slots])
 
   if (!slots) return <p className="smf-small">Loading banners…</p>
 
@@ -109,7 +153,11 @@ export function AdAdmin() {
           }}
         />
       ))}
-      {saved ? <p className="smf-small">บันทึกช่อง {saved} แล้ว</p> : null}
+      {saved ? (
+        <p className="smf-toast" role="status" data-testid="ad-toast">
+          บันทึกแล้ว
+        </p>
+      ) : null}
       {error ? <p className="smf-error">{error}</p> : null}
     </div>
   )
@@ -129,18 +177,29 @@ function AdEditor({
   const [alt, setAlt] = useState(slot.alt)
   const [enabled, setEnabled] = useState(slot.enabled)
   const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState(slot.image)
   const [pending, setPending] = useState(false)
+
+  async function chooseFile(next: File | undefined) {
+    if (!next) return
+    if (!next.type.startsWith('image/')) {
+      onError('เลือกไฟล์รูปภาพ')
+      return
+    }
+    const shrunk = await shrinkAdImage(next)
+    setFile(new File([shrunk], 'banner.jpg', { type: 'image/jpeg' }))
+    setPreview(URL.createObjectURL(shrunk))
+  }
 
   async function save() {
     setPending(true)
     try {
       let payload = await forumSend<{ slots: AdSlot[] }>(`/api/forum/ads/${slot.slot}`, 'PUT', { imageUrl, linkUrl, alt, enabled })
       if (file) {
-        if (file.size > 1024 * 1024) throw new Error('รูปใหญ่เกิน 1 MB')
         const headers = new Headers()
         const token = sessionToken()
         if (token) headers.set('Authorization', `Bearer ${token}`)
-        headers.set('Content-Type', file.type || 'application/octet-stream')
+        headers.set('Content-Type', 'image/jpeg')
         const response = await fetch(`/api/forum/ads/${slot.slot}/image`, { method: 'POST', body: file, headers })
         const data = (await response.json().catch(() => ({}))) as { message?: string; slots?: AdSlot[] }
         if (!response.ok || !data.slots) throw new Error(data.message || 'อัปโหลดรูปไม่สำเร็จ')
@@ -183,21 +242,26 @@ function AdEditor({
         void save()
       }}
     >
-      <strong>ช่อง {slot.slot}</strong>
+      <strong id={`slot-${slot.slot}`}>ช่อง {slot.slot}</strong>
       <p className="smf-small">ขนาดแนะนำ 600×200 px สัดส่วน 3:1 แสดงประมาณ 300×100 บนเดสก์ท็อป และย่อลงบนมือถือแบบ contain ไม่ครอปรูป</p>
+      {preview ? <img className="smf-ad-preview" src={preview} alt="" /> : null}
       <label className="smf-check">
         <input type="checkbox" checked={enabled} data-testid={`ad-enabled-${slot.slot}`} onChange={(event) => setEnabled(event.target.checked)} />
-        เปิดใช้งาน
+        แสดงบนเว็บ
       </label>
-      <label className="smf-field">
-        <span>อัปโหลดรูป (jpg, png, webp, gif ไม่เกิน 1 MB)</span>
+      <label className="smf-file-btn">
+        📷 เลือกรูปจากมือถือ/คอม
         <input
-          className="smf-input"
+          className="smf-file-input"
           type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif"
+          accept="image/*"
           aria-label={`ไฟล์รูปป้าย ${slot.slot}`}
           data-testid={`ad-file-${slot.slot}`}
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          onChange={(event) => {
+            const next = event.target.files?.[0]
+            event.target.value = ''
+            void chooseFile(next)
+          }}
         />
       </label>
       {slot.hasFile ? (
@@ -210,43 +274,112 @@ function AdEditor({
         <input className="smf-input" value={imageUrl} placeholder="https://" aria-label={`รูปป้าย ${slot.slot}`} data-testid={`ad-image-${slot.slot}`} onChange={(event) => setImageUrl(event.target.value)} />
       </label>
       <label className="smf-field">
-        <span>ลิงก์เมื่อคลิก</span>
+        <span>ลิงก์ปลายทาง</span>
         <input className="smf-input" value={linkUrl} placeholder="https://" aria-label={`ลิงก์ป้าย ${slot.slot}`} data-testid={`ad-link-${slot.slot}`} onChange={(event) => setLinkUrl(event.target.value)} />
       </label>
       <label className="smf-field">
-        <span>ชื่อผู้โฆษณา / alt</span>
+        <span>ชื่อลูกค้า</span>
         <input className="smf-input" value={alt} maxLength={120} aria-label={`คำอธิบายป้าย ${slot.slot}`} data-testid={`ad-alt-${slot.slot}`} onChange={(event) => setAlt(event.target.value)} />
       </label>
-      <button type="submit" className="smf-button" disabled={pending} data-testid={`ad-save-${slot.slot}`}>
-        Save
-      </button>
+      <div className="smf-form-actions">
+        <button type="submit" className="smf-button" disabled={pending} data-testid={`ad-save-${slot.slot}`}>
+          บันทึก
+        </button>
+        <button type="button" className="smf-button smf-button-alt" disabled={pending} data-testid={`ad-clear-${slot.slot}`} onClick={() => void clearSlot()}>
+          ล้างป้าย (กลับเป็นป้ายว่าง)
+        </button>
+      </div>
     </form>
   )
+
+  async function clearSlot() {
+    setPending(true)
+    try {
+      const payload = await forumSend<{ slots: AdSlot[] }>(`/api/forum/ads/${slot.slot}`, 'PUT', {
+        imageUrl: '',
+        linkUrl: '',
+        alt: '',
+        enabled: true,
+        clearImage: true,
+      })
+      setImageUrl('')
+      setLinkUrl('')
+      setAlt('')
+      setEnabled(true)
+      setFile(null)
+      setPreview('')
+      onSaved(payload.slots)
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : 'ล้างป้ายไม่สำเร็จ')
+    } finally {
+      setPending(false)
+    }
+  }
 }
 
-function AdCard({ slot }: { slot: AdSlot }) {
-  if (!slot.image) {
-    return (
-      <div className="smf-ad smf-ad-empty" data-testid={`ad-slot-${slot.slot}`}>
-        <strong>ป้ายโฆษณาว่าง</strong>
+function AdCard({ slot, canEdit }: { slot: AdSlot; canEdit: boolean }) {
+  const empty = (
+    <>
+      {!slot.enabled ? <strong>ปิดอยู่</strong> : <strong>ป้ายโฆษณาว่าง</strong>}
+      {canEdit ? null : (
         <a href={LINE_URL} target="_blank" rel="noopener noreferrer">
           ติดต่อโฆษณา แอดไลน์ ID: fibo99
         </a>
+      )}
+    </>
+  )
+  const picture = slot.image ? <img src={slot.image} alt={slot.alt || 'ป้ายโฆษณา'} /> : empty
+  if (canEdit) {
+    return (
+      <button type="button" className="smf-ad smf-ad-editable" data-testid={`ad-slot-${slot.slot}`} onClick={() => go(`/admin/ads#slot-${slot.slot}`)}>
+        {picture}
+        <span className="smf-ad-edit" data-testid={`ad-edit-${slot.slot}`}>
+          ✏️ แก้ไขป้ายนี้
+        </span>
+      </button>
+    )
+  }
+  if (!slot.image) {
+    return (
+      <div className="smf-ad smf-ad-empty" data-testid={`ad-slot-${slot.slot}`}>
+        {empty}
       </div>
     )
   }
-  const image = <img src={slot.image} alt={slot.alt || 'ป้ายโฆษณา'} />
   return (
     <div className="smf-ad" data-testid={`ad-slot-${slot.slot}`}>
       {slot.linkUrl ? (
         <a className="smf-ad-link" href={slot.linkUrl} target="_blank" rel="sponsored noopener noreferrer">
-          {image}
+          {picture}
         </a>
       ) : (
-        image
+        picture
       )}
     </div>
   )
+}
+
+async function shrinkAdImage(file: File) {
+  if (file.size <= 1024 * 1024 && file.type === 'image/gif') return file
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, 1200 / bitmap.width, 400 / bitmap.height)
+  const width = Math.max(1, Math.round(bitmap.width * scale))
+  const height = Math.max(1, Math.round(bitmap.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('แปลงรูปไม่สำเร็จ')
+  context.drawImage(bitmap, 0, 0, width, height)
+  bitmap.close()
+  let quality = 0.86
+  let blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
+  while (blob && blob.size > 900_000 && quality > 0.45) {
+    quality -= 0.12
+    blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
+  }
+  if (!blob || blob.size > 1024 * 1024) throw new Error('รูปยังใหญ่เกิน 1 MB หลังย่อ')
+  return blob
 }
 
 function emptySlots(): AdSlot[] {
