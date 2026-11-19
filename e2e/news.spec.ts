@@ -22,6 +22,8 @@ test('crypto news panel opens without covering the room', async ({ page }) => {
   await expect(xFrame.or(xFallback).first()).toBeVisible({ timeout: 12_000 })
   await page.screenshot({ path: `${ARTIFACTS}/screenshot_news_x.png` })
 
+  await expect(page.getByTestId('forum-index')).toBeVisible()
+  await page.goto('/live')
   await expect(page.getByTestId('enter-room')).toBeVisible()
   await expect(page.getByTestId('chat-log')).toBeVisible()
 })

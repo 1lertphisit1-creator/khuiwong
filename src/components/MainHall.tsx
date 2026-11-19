@@ -4,10 +4,6 @@ import { AdminPanel } from '@/components/AdminPanel.tsx'
 import { ChatPanel } from '@/components/ChatPanel.tsx'
 import { ControlBar } from '@/components/ControlBar.tsx'
 import { DjPlayer } from '@/components/DjPlayer.tsx'
-import { EtfFlowCard } from '@/components/EtfFlowCard.tsx'
-import { FollowLinks } from '@/components/FollowLinks.tsx'
-import { NewsPanel } from '@/components/NewsPanel.tsx'
-import { PriceWatchlist } from '@/components/PriceWatchlist.tsx'
 import { PeoplePanel } from '@/components/PeoplePanel.tsx'
 import { RankBadge } from '@/components/RankBadge.tsx'
 import { VideoStage } from '@/components/VideoStage.tsx'
@@ -17,31 +13,41 @@ import { useRoom } from '@/hooks/useRoom.ts'
 import { rememberName, storedName } from '@/lib/entry.ts'
 import { acquireMedia, stopStream } from '@/lib/media.ts'
 import { cleanDisplayName } from '@/lib/roomCode.ts'
-import { api, clearSession, currentAccount, saveSession, type Account } from '@/lib/session.ts'
+import { currentAccount, type Account } from '@/lib/session.ts'
 import { cn } from '@/lib/utils.ts'
 import type { Participant, Permissions } from '@/types.ts'
 
 const MAIN_ROOM = 'MAIN'
-type Pane = 'room' | 'people' | 'news' | 'price' | 'market'
 
 export function MainHall() {
   const [account, setAccount] = useState<Account | null>(null)
-  const [nickname, setNickname] = useState('')
-  const [password, setPassword] = useState('')
+  const [accountReady, setAccountReady] = useState(false)
   const [name, setName] = useState(storedName)
-  const [authError, setAuthError] = useState<string | null>(null)
   const [enterError, setEnterError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
-  const [pane, setPane] = useState<Pane>('room')
   const [adminOpen, setAdminOpen] = useState(false)
+  const [peopleOpen, setPeopleOpen] = useState(false)
 
   const room = useRoom({ roomId: MAIN_ROOM, displayName: '', localStream: stream })
   const inside = Boolean(room.selfId)
 
   useEffect(() => {
-    void currentAccount().then(setAccount)
+    let stopped = false
+    const refresh = () => {
+      void currentAccount().then((next) => {
+        if (stopped) return
+        setAccount(next)
+        setAccountReady(true)
+      })
+    }
+    refresh()
+    window.addEventListener('khuiwong-auth', refresh)
+    return () => {
+      stopped = true
+      window.removeEventListener('khuiwong-auth', refresh)
+    }
   }, [])
 
   useEffect(() => {
@@ -60,24 +66,6 @@ export function MainHall() {
     )
   }, [room.audioOn, room.participants, room.selfId, room.sharing])
 
-  async function authenticate(path: '/api/register' | '/api/login') {
-    setAuthError(null)
-    setPending(true)
-    try {
-      const data = await api<{ token: string; account: Account }>(path, {
-        method: 'POST',
-        body: JSON.stringify({ nickname, password }),
-      })
-      saveSession(data.token)
-      setAccount(data.account)
-      setPassword('')
-    } catch (reason) {
-      setAuthError(reason instanceof Error ? reason.message : 'เข้าสู่ระบบไม่สำเร็จ')
-    } finally {
-      setPending(false)
-    }
-  }
-
   async function enter() {
     const displayName = account?.nickname ?? cleanDisplayName(name)
     if (!displayName) {
@@ -93,70 +81,21 @@ export function MainHall() {
     const ok = room.enter(displayName)
     setPending(false)
     if (!ok) setEnterError('ยังเชื่อมต่อไม่ได้ ลองอีกครั้ง')
-    else setPane('room')
   }
 
   function leave() {
     stopStream(stream)
     setStream(null)
     room.exit()
-    setPane('room')
   }
 
   const statusLabel = room.status === 'connected' ? 'เชื่อมต่อแล้ว' : 'กำลังเชื่อมต่อ'
 
   return (
-    <main data-testid="lobby" className="flex h-full min-h-0 flex-col">
-      <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[17rem_minmax(0,1fr)_22rem]">
-        <aside className={cn('min-h-0 flex-col gap-3 overflow-y-auto pb-24 lg:flex lg:pb-28', pane === 'market' || pane === 'price' ? 'flex' : 'hidden')}>
-          <figure className={cn('ornament-panel relative overflow-hidden rounded-2xl', pane === 'price' && 'hidden lg:block')}>
-            <img
-              src="/brand/fibo99-hero.webp"
-              alt="FIBO99"
-              width={960}
-              height={960}
-              className="h-36 w-full object-cover object-[center_18%] lg:h-40"
-            />
-            <figcaption className="absolute inset-x-0 bottom-0 flex items-end gap-2 bg-gradient-to-t from-black via-black/70 to-transparent px-3 pt-10 pb-3">
-              <img src="/brand/fibo99-avatar.webp" alt="" width={40} height={40} className="h-10 w-10 rounded-full object-cover shadow-[0_0_0_1px_#1a120b,0_0_0_2px_#d4b36a]" />
-              <div>
-                <h1 className="font-display text-2xl leading-none font-bold text-gold">FIBO99</h1>
-                <p className="text-[10px] tracking-[0.22em] text-cream">คุยวง</p>
-              </div>
-            </figcaption>
-          </figure>
-          <div className={pane === 'price' ? 'hidden lg:block' : undefined}>
-          <AccountBox
-            account={account}
-            nickname={nickname}
-            password={password}
-            pending={pending}
-            onNickname={setNickname}
-            onPassword={setPassword}
-            onLogin={() => void authenticate('/api/login')}
-            onRegister={() => void authenticate('/api/register')}
-            error={authError}
-            onLogout={() => {
-              void api('/api/logout', { method: 'POST' }).catch(() => {})
-              clearSession()
-              setAccount(null)
-            }}
-          />
-          </div>
-          <PriceWatchlist />
-          <div className={cn('shrink-0', pane === 'price' && 'hidden lg:block')}>
-            <EtfFlowCard />
-          </div>
-        </aside>
-
-        <section
-          data-testid="room"
-          className={cn(
-            'ornament-panel min-h-0 flex-col overflow-hidden rounded-2xl',
-            pane === 'room' ? 'flex' : 'hidden lg:flex',
-          )}
-        >
-          <header className="flex items-center gap-2 border-b border-gold/30 px-3 py-2">
+    <main data-testid="live-room" className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
+        <section data-testid="room" className="ornament-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl">
+          <header className="flex flex-wrap items-center gap-2 border-b border-gold/30 px-3 py-2">
             <p data-testid="connection-status" className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className={cn('h-2 w-2 rounded-full', room.status === 'connected' ? 'bg-teal' : 'animate-pulse bg-amber')} />
               {statusLabel}
@@ -164,7 +103,10 @@ export function MainHall() {
             <span data-testid="room-capacity" className="text-xs text-muted-foreground">
               {room.participants.length}/{room.caps.people} · ไมค์ {room.caps.speakers}
             </span>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Button type="button" size="sm" variant="secondary" className="lg:hidden" onClick={() => setPeopleOpen((value) => !value)}>
+                ผู้คน
+              </Button>
               {inside && room.self.rank ? <RankBadge rank={room.self.rank} label={room.self.rankLabel} /> : null}
               {inside && canModerate(room.self.permissions) ? (
                 <Button type="button" size="sm" variant="secondary" data-testid="open-admin" onClick={() => setAdminOpen(true)}>
@@ -180,7 +122,11 @@ export function MainHall() {
             </div>
           </header>
           {warning ? <p className="px-3 pt-2 text-xs text-muted-foreground">{warning}</p> : null}
-          {room.error ? <p role="alert" className="px-3 pt-2 text-sm text-rose">{room.error}</p> : null}
+          {room.error ? (
+            <p role="alert" className="px-3 pt-2 text-sm text-rose">
+              {room.error}
+            </p>
+          ) : null}
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1">
               <VideoStage
@@ -243,7 +189,7 @@ export function MainHall() {
                       onChange={(event) => setName(event.target.value)}
                     />
                   )}
-                  <Button type="submit" data-testid="enter-room" disabled={pending || room.status !== 'connected'}>
+                  <Button type="submit" data-testid="enter-room" disabled={pending || !accountReady || room.status !== 'connected'}>
                     {pending ? '...' : 'เข้าคุย'}
                   </Button>
                 </form>
@@ -259,37 +205,27 @@ export function MainHall() {
             onSkip={(direction) => room.send('dj-skip', { direction })}
             onRemove={(trackId) => room.send('dj-remove', { trackId })}
           />
-          {enterError ? <p role="alert" className="px-3 pb-2 text-sm text-rose">{enterError}</p> : null}
+          {enterError ? (
+            <p role="alert" className="px-3 pb-2 text-sm text-rose">
+              {enterError}
+            </p>
+          ) : null}
         </section>
 
-        <aside className="contents min-h-0 lg:flex lg:flex-col lg:gap-3">
-          <div className={cn('min-h-0 overflow-hidden rounded-2xl border border-gold/35 bg-card/40 lg:flex-1', pane === 'people' ? 'block' : 'hidden lg:block')}>
-            <PeoplePanel
-              people={people}
-              selfId={room.selfId}
-              onUploadAvatar={
-                inside
-                  ? async (file) => {
-                      await room.uploadAvatar(file)
-                    }
-                  : undefined
-              }
-            />
-          </div>
-          <div className={cn('min-h-0 lg:flex-1', pane === 'news' ? 'block' : 'hidden lg:block')}>
-            <NewsPanel embedded />
-          </div>
+        <aside className={cn('min-h-0 lg:flex lg:w-72 lg:flex-col', peopleOpen ? 'flex min-h-64 flex-1 flex-col' : 'hidden')}>
+          <PeoplePanel
+            people={people}
+            selfId={room.selfId}
+            onUploadAvatar={
+              inside
+                ? async (file) => {
+                    await room.uploadAvatar(file)
+                  }
+                : undefined
+            }
+          />
         </aside>
       </div>
-
-      <FollowLinks />
-      <nav className="grid grid-cols-5 border-t border-gold/30 bg-burgundy/90 lg:hidden">
-        <PaneButton current={pane} id="room" onSelect={setPane}>ห้อง</PaneButton>
-        <PaneButton current={pane} id="people" onSelect={setPane}>ผู้คน</PaneButton>
-        <PaneButton current={pane} id="news" onSelect={setPane}>ข่าว</PaneButton>
-        <PaneButton current={pane} id="price" onSelect={setPane}>ราคา</PaneButton>
-        <PaneButton current={pane} id="market" onSelect={setPane}>แบรนด์</PaneButton>
-      </nav>
 
       {adminOpen && inside ? (
         <AdminPanel
@@ -315,69 +251,6 @@ export function MainHall() {
         />
       ) : null}
     </main>
-  )
-}
-
-function AccountBox({
-  account,
-  nickname,
-  password,
-  pending,
-  error,
-  onNickname,
-  onPassword,
-  onLogin,
-  onRegister,
-  onLogout,
-}: {
-  account: Account | null
-  nickname: string
-  password: string
-  pending: boolean
-  error: string | null
-  onNickname: (value: string) => void
-  onPassword: (value: string) => void
-  onLogin: () => void
-  onRegister: () => void
-  onLogout: () => void
-}) {
-  if (account) {
-    return (
-      <div className="flex items-center justify-between gap-2 rounded-2xl border border-gold/30 px-3 py-2">
-        <p className="truncate text-sm">
-          <span data-testid="session-name" className="font-medium text-gold">{account.nickname}</span>
-        </p>
-        <Button type="button" size="sm" variant="ghost" onClick={onLogout}>
-          ออกจากบัญชี
-        </Button>
-      </div>
-    )
-  }
-  return (
-    <form
-      className="space-y-2 rounded-2xl border border-gold/30 p-3"
-      onSubmit={(event) => {
-        event.preventDefault()
-        onLogin()
-      }}
-    >
-      <Input value={nickname} autoComplete="username" placeholder="ชื่อบัญชี" aria-label="ชื่อบัญชี" data-testid="account-name" onChange={(event) => onNickname(event.target.value)} />
-      <Input value={password} type="password" autoComplete="current-password" placeholder="รหัสผ่าน" aria-label="รหัสผ่าน" data-testid="account-password" onChange={(event) => onPassword(event.target.value)} />
-      <div className="grid grid-cols-2 gap-2">
-        <Button type="submit" variant="secondary" disabled={pending}>เข้าสู่ระบบ</Button>
-        <Button type="button" disabled={pending} data-testid="register" onClick={onRegister}>สมัคร</Button>
-      </div>
-      {error ? <p role="alert" className="text-sm text-rose">{error}</p> : null}
-    </form>
-  )
-}
-
-function PaneButton({ current, id, onSelect, children }: { current: Pane; id: Pane; onSelect: (id: Pane) => void; children: string }) {
-  const active = current === id
-  return (
-    <button type="button" className={cn('py-3 text-xs sm:text-sm', active ? 'font-medium text-amber' : 'text-muted-foreground')} onClick={() => onSelect(id)}>
-      {children}
-    </button>
   )
 }
 

@@ -33,6 +33,7 @@ test('theme lobby and room on desktop and mobile', async ({ browser }) => {
   await expect(signedIn.or(taken)).toBeVisible()
   if (await taken.isVisible()) await page.getByRole('button', { name: 'เข้าสู่ระบบ' }).click()
   await expect(signedIn).toHaveText('มิ้นท์ธีม')
+  await page.getByTestId('nav-live').click()
   await page.getByTestId('enter-room').click()
   await expect(page.getByTestId('room')).toBeVisible()
   await expect(page.getByTestId('connection-status')).toContainText('เชื่อมต่อแล้ว')

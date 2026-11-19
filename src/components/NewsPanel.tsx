@@ -26,7 +26,7 @@ const DEFAULTS: NewsConfig = {
   xApi: false,
 }
 
-export function NewsPanel({ embedded = false }: { embedded?: boolean }) {
+export function NewsPanel({ embedded = false, forum = false }: { embedded?: boolean; forum?: boolean }) {
   const [open, setOpen] = useState(embedded)
   const [tab, setTab] = useState<Tab>('facebook')
   const [config, setConfig] = useState<NewsConfig>(DEFAULTS)
@@ -85,12 +85,14 @@ export function NewsPanel({ embedded = false }: { embedded?: boolean }) {
           data-testid="news-panel"
           className={
             embedded
-              ? 'flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gold/45 bg-[#2a1218]'
+              ? forum
+                ? 'flex max-h-[40rem] min-h-[18rem] flex-col overflow-hidden border border-[#696969] bg-white text-black'
+                : 'flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-gold/45 bg-[#2a1218]'
               : 'fixed inset-x-0 bottom-0 z-30 flex h-[72dvh] flex-col border border-gold/45 bg-[#2a1218] shadow-2xl md:inset-x-auto md:top-14 md:right-3 md:bottom-3 md:h-auto md:w-[min(400px,calc(100vw-1.5rem))] md:rounded-2xl'
           }
         >
-          <header className="flex items-center gap-2 border-b border-gold/30 px-3 py-2">
-            <h2 className="font-display text-lg font-bold text-gold">ข่าว Crypto</h2>
+          <header className={forum ? 'flex items-center gap-2 bg-[#334466] px-2 py-1 text-white' : 'flex items-center gap-2 border-b border-gold/30 px-3 py-2'}>
+            <h2 className={forum ? 'text-sm font-bold' : 'font-display text-lg font-bold text-gold'}>ข่าว Crypto</h2>
             <Button type="button" size="sm" variant="secondary" data-testid="news-refresh" onClick={() => setReloadKey((key) => key + 1)}>
               รีเฟรช
             </Button>
@@ -101,10 +103,10 @@ export function NewsPanel({ embedded = false }: { embedded?: boolean }) {
             )}
           </header>
           <div className="grid grid-cols-2 gap-2 px-3 pt-2" role="tablist">
-            <TabButton current={tab} id="facebook" onSelect={setTab}>
+            <TabButton current={tab} id="facebook" light={forum} onSelect={setTab}>
               Facebook
             </TabButton>
-            <TabButton current={tab} id="x" onSelect={setTab}>
+            <TabButton current={tab} id="x" light={forum} onSelect={setTab}>
               X · @{config.xHandle}
             </TabButton>
           </div>
@@ -114,7 +116,7 @@ export function NewsPanel({ embedded = false }: { embedded?: boolean }) {
             ) : (
               <div className="space-y-3">
                 {posts.length > 0 ? <PostList posts={posts} /> : null}
-                <XTimeline key={`x-${reloadKey}`} handle={config.xHandle} url={config.xUrl} />
+                <XTimeline key={`x-${reloadKey}`} handle={config.xHandle} url={config.xUrl} theme={forum ? 'light' : 'dark'} />
               </div>
             )}
           </div>
@@ -127,22 +129,31 @@ export function NewsPanel({ embedded = false }: { embedded?: boolean }) {
 function TabButton({
   current,
   id,
+  light = false,
   onSelect,
   children,
 }: {
   current: Tab
   id: Tab
+  light?: boolean
   onSelect: (id: Tab) => void
   children: ReactNode
 }) {
   const active = current === id
+  const tone = light
+    ? active
+      ? 'border-[#334466] bg-[#334466] text-white'
+      : 'border-[#6b8abf] text-[#334466]'
+    : active
+      ? 'border-gold bg-gold text-ink'
+      : 'border-gold/30 text-cream'
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
       data-testid={`news-tab-${id}`}
-      className={`rounded-full border px-2 py-1.5 text-sm ${active ? 'border-gold bg-gold text-ink' : 'border-gold/30 text-cream'}`}
+      className={`min-h-11 rounded-full border px-2 py-1.5 text-sm ${tone}`}
       onClick={() => onSelect(id)}
     >
       {children}
@@ -215,7 +226,7 @@ function FacebookTimeline({ pageUrl }: { pageUrl: string }) {
   )
 }
 
-function XTimeline({ handle, url }: { handle: string; url: string }) {
+function XTimeline({ handle, url, theme = 'dark' }: { handle: string; url: string; theme?: 'dark' | 'light' }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [failed, setFailed] = useState(false)
 
@@ -250,7 +261,7 @@ function XTimeline({ handle, url }: { handle: string; url: string }) {
       <div ref={rootRef}>
         <a
           className="twitter-timeline"
-          data-theme="dark"
+          data-theme={theme}
           data-chrome="noheader nofooter noborders transparent"
           data-height="520"
           data-dnt="true"

@@ -27,7 +27,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'rm -rf data && NODE_ENV=development OWNER_SECRET=owner-secret-demo npx tsx server/index.ts',
+    command: 'rm -rf data && NODE_ENV=development OWNER_SECRET=owner-secret-demo SITE_OWNER_PASSWORD=owner-pass-99 npx tsx server/index.ts',
     url: `${baseURL}/api/health`,
     reuseExistingServer: true,
     timeout: 30_000,

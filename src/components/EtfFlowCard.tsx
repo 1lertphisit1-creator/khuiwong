@@ -22,7 +22,7 @@ type Board = {
   message: string | null
 }
 
-export function EtfFlowCard() {
+export function EtfFlowCard({ forum = false }: { forum?: boolean }) {
   const [board, setBoard] = useState<Board | null>(null)
   const [asset, setAsset] = useState<'BTC' | 'ETH'>('BTC')
 
@@ -57,16 +57,16 @@ export function EtfFlowCard() {
     : null
 
   return (
-    <section data-testid="etf-flow" className="ornament-panel rounded-[1.4rem] p-3 sm:p-4">
-      <div className="flex items-center gap-2">
-        <h2 className="font-display text-base font-bold text-gold">ETF Flow</h2>
-        <div className="ml-auto flex rounded-full border border-gold/30 p-0.5 text-xs">
+    <section data-testid="etf-flow" className={forum ? 'border border-[#696969] bg-white p-2 text-black' : 'ornament-panel rounded-[1.4rem] p-3 sm:p-4'}>
+      <div className={forum ? 'mb-2 flex items-center gap-2 bg-[#334466] px-2 py-1 text-white' : 'flex items-center gap-2'}>
+        <h2 className={forum ? 'text-xs font-bold' : 'font-display text-base font-bold text-gold'}>ETF Flow</h2>
+        <div className={forum ? 'ml-auto flex border border-white/40 p-0.5 text-xs' : 'ml-auto flex rounded-full border border-gold/30 p-0.5 text-xs'}>
           {(['BTC', 'ETH'] as const).map((id) => (
             <button
               key={id}
               type="button"
               data-testid={`etf-tab-${id}`}
-              className={`rounded-full px-2.5 py-1 ${asset === id ? 'bg-gold text-ink' : 'text-cream'}`}
+              className={`min-h-11 rounded-full px-3 py-1 ${asset === id ? (forum ? 'bg-white text-[#334466]' : 'bg-gold text-ink') : forum ? 'text-white' : 'text-cream'}`}
               onClick={() => setAsset(id)}
             >
               {id}
@@ -75,14 +75,14 @@ export function EtfFlowCard() {
         </div>
       </div>
       {!current ? (
-        <p className="mt-3 text-sm text-muted-foreground">{board?.message || 'ยังไม่มีข้อมูลวันนี้'}</p>
+        <p className={forum ? 'mt-3 text-sm text-[#333]' : 'mt-3 text-sm text-muted-foreground'}>{board?.message || 'ยังไม่มีข้อมูลวันนี้'}</p>
       ) : (
         <>
-          <p className="mt-2 text-[11px] tracking-wide text-muted-foreground">{current.date}</p>
+          <p className={forum ? 'mt-2 text-[11px] tracking-wide text-[#444]' : 'mt-2 text-[11px] tracking-wide text-muted-foreground'}>{current.date}</p>
           <p className={`font-display text-2xl font-bold tabular-nums ${tone(current.totalCoin ?? current.totalUsd)}`}>
             {current.totalCoin == null ? money(current.totalUsd) : `${current.approximate ? '≈ ' : ''}${coinLabel(current.totalCoin, current.asset, true)}`}
           </p>
-          {current.totalCoin != null ? <p className="text-[11px] tabular-nums text-muted-foreground">{money(current.totalUsd)}</p> : null}
+          {current.totalCoin != null ? <p className={forum ? 'text-[11px] tabular-nums text-[#444]' : 'text-[11px] tabular-nums text-muted-foreground'}>{money(current.totalUsd)}</p> : null}
           {current.priceBasis === 'live' ? <p className="text-[10px] text-[#e0c17a]">ใช้ราคาปัจจุบัน</p> : null}
           <Sparkline history={current.history} />
           <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs sm:grid-cols-3">
@@ -90,7 +90,7 @@ export function EtfFlowCard() {
               const value = fund.coin ?? null
               return (
                 <li key={fund.ticker} className="flex items-center justify-between gap-2">
-                  <span className="text-cream">{fund.ticker}</span>
+                  <span className={forum ? 'text-[#222]' : 'text-cream'}>{fund.ticker}</span>
                   <span className={`tabular-nums ${value == null ? 'text-muted-foreground' : tone(value)}`}>
                     {value == null ? '—' : coinLabel(value, current.asset, false)}
                   </span>
@@ -100,9 +100,9 @@ export function EtfFlowCard() {
           </ul>
         </>
       )}
-      <p className="mt-3 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+      <p className={forum ? 'mt-3 flex items-center justify-between gap-2 text-[10px] text-[#444]' : 'mt-3 flex items-center justify-between gap-2 text-[10px] text-muted-foreground'}>
         <span>อัปเดตล่าสุด {updated ?? '—'}</span>
-        <a href={board?.sourceUrl || 'https://farside.co.uk/'} target="_blank" rel="noopener noreferrer" className="text-gold">
+        <a href={board?.sourceUrl || 'https://farside.co.uk/'} target="_blank" rel="noopener noreferrer" className={forum ? 'text-[#334466] underline' : 'text-gold'}>
           Farside
         </a>
       </p>
