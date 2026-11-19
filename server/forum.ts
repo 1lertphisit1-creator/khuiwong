@@ -98,6 +98,7 @@ export function initForum() {
   ensureSetting('site_name', DEFAULT_SITE_NAME)
   ensureSetting('forum_name', DEFAULT_FORUM_NAME)
   removeEtfBoard()
+  removeProbeAccount('pxshotc132')
   sqlite()
     .prepare(
       `UPDATE forum_posts SET body = REPLACE(body, ?, ?) WHERE body LIKE ?`,
@@ -1241,6 +1242,23 @@ function avatarUrl(accountId: string | null) {
   const stamp = avatarStamp(accountId)
   if (!stamp) return null
   return `/api/avatars/${accountId}?v=${stamp}`
+}
+
+function removeProbeAccount(nickname: string) {
+  const account = findAccountByKey(nicknameKey(nickname))
+  if (!account) return
+  const db = sqlite()
+  const topics = db.prepare('SELECT id FROM forum_topics WHERE author_account_id = ?').all(account.id) as { id: number }[]
+  for (const topic of topics) {
+    db.prepare('DELETE FROM forum_posts WHERE topic_id = ?').run(topic.id)
+    db.prepare('DELETE FROM forum_topics WHERE id = ?').run(topic.id)
+  }
+  db.prepare('DELETE FROM forum_posts WHERE author_account_id = ?').run(account.id)
+  db.prepare('DELETE FROM sessions WHERE account_id = ?').run(account.id)
+  db.prepare('DELETE FROM avatars WHERE account_id = ?').run(account.id)
+  db.prepare('DELETE FROM room_members WHERE account_id = ?').run(account.id)
+  db.prepare('DELETE FROM accounts WHERE id = ?').run(account.id)
+  console.log(`removed test account ${nickname}`)
 }
 
 function removeEtfBoard() {
