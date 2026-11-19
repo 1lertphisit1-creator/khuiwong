@@ -1,6 +1,6 @@
 import type { PageShare } from './forum.ts'
 
-const SHARE_IMAGE_PATH = '/brand/share.png'
+const SHARE_IMAGE_PATH = '/brand/og-board-v2.png'
 const SHARE_WIDTH = 1200
 const SHARE_HEIGHT = 630
 
