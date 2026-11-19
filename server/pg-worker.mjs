@@ -4,7 +4,21 @@ import { parentPort } from 'node:worker_threads'
 pg.types.setTypeParser(20, (value) => Number(value))
 
 const IDENTITY = new Set(['forum_categories', 'forum_boards', 'forum_topics', 'forum_posts'])
-const client = new pg.Client({ connectionString: process.env.DATABASE_URL })
+const client = new pg.Client(pgOptions(process.env.DATABASE_URL))
+
+function pgOptions(connectionString) {
+  let ssl
+  try {
+    const url = new URL(connectionString)
+    const host = url.hostname
+    const local = host === 'localhost' || host === '127.0.0.1' || host === '::1'
+    const mode = url.searchParams.get('sslmode')
+    if (!local && mode !== 'disable') ssl = { rejectUnauthorized: false }
+  } catch {
+    ssl = { rejectUnauthorized: false }
+  }
+  return ssl ? { connectionString, ssl } : { connectionString }
+}
 
 function translate(sql) {
   let index = 0

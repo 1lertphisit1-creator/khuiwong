@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button.tsx'
 import { Input } from '@/components/ui/input.tsx'
 import { RankBadge } from '@/components/RankBadge.tsx'
-import { api } from '@/lib/session.ts'
 import { RANK_OPTIONS, safeColor, type Participant, type Permissions, type RankId, type RoomPolicy } from '@/types.ts'
 
 const ASSIGNABLE: RankId[] = ['admin', 'moderator', 'vip', 'member', 'guest']
@@ -252,7 +251,6 @@ export function AdminPanel({
           </form>
         ) : null}
 
-        {permissions.manageRanks ? <MusicUrlForm /> : null}
 
         {ownerSecretEnabled ? (
           <form
@@ -280,61 +278,6 @@ export function AdminPanel({
         ) : null}
       </aside>
     </div>
-  )
-}
-
-function MusicUrlForm() {
-  const [url, setUrl] = useState('')
-  const [note, setNote] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    let stopped = false
-    void fetch('/api/settings')
-      .then((response) => (response.ok ? (response.json() as Promise<{ musicUrl?: string }>) : null))
-      .then((payload) => {
-        if (!stopped && payload?.musicUrl) setUrl(payload.musicUrl)
-      })
-      .catch(() => {})
-    return () => {
-      stopped = true
-    }
-  }, [])
-
-  return (
-    <form
-      className="mt-6 space-y-2"
-      onSubmit={(event) => {
-        event.preventDefault()
-        setSaving(true)
-        setNote(null)
-        void api<{ musicUrl: string }>('/api/settings/music', {
-          method: 'PUT',
-          body: JSON.stringify({ musicUrl: url }),
-        })
-          .then((saved) => {
-            setUrl(saved.musicUrl)
-            setNote('บันทึกเพลงพื้นหลังแล้ว')
-          })
-          .catch((reason: unknown) => {
-            setNote(reason instanceof Error ? reason.message : 'บันทึกไม่สำเร็จ')
-          })
-          .finally(() => setSaving(false))
-      }}
-    >
-      <h3 className="font-display text-lg font-bold">เพลงพื้นหลังล็อบบี้</h3>
-      <p className="text-xs text-muted-foreground">ลิงก์ YouTube ของวิดีโอหรือเพลย์ลิสต์ ทุกคนได้ยินเพลงนี้ในล็อบบี้</p>
-      <Input
-        data-testid="bgm-url"
-        value={url}
-        aria-label="ลิงก์เพลงพื้นหลัง"
-        onChange={(event) => setUrl(event.target.value)}
-      />
-      <Button type="submit" variant="secondary" data-testid="bgm-save" disabled={saving}>
-        {saving ? 'กำลังบันทึก...' : 'บันทึกเพลง'}
-      </Button>
-      {note ? <p className="text-xs text-gold">{note}</p> : null}
-    </form>
   )
 }
 
