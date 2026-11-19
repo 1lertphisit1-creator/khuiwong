@@ -68,7 +68,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
     await api('/api/logout', { method: 'POST' }).catch(() => {})
     clearSession()
     window.dispatchEvent(new Event('khuiwong-auth'))
-    if (route.name === 'profile' || route.name === 'admin') go('/')
+    if (route.name === 'profile' || route.name === 'admin' || route.name === 'ads') go('/')
   }
 
   const homeCurrent = route.name === 'index' || route.name === 'board' || route.name === 'topic'
@@ -104,7 +104,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
                   PROFILE
                 </ForumLink>
                 {me.canModerate ? (
-                  <ForumLink to="/admin" current={route.name === 'admin'} testId="nav-admin">
+                  <ForumLink to="/admin" current={route.name === 'admin' || route.name === 'ads'} testId="nav-admin">
                     ADMIN
                   </ForumLink>
                 ) : null}
@@ -160,7 +160,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
               </ForumLink>
             </p>
         </footer>
-        <AdSlots />
+        <AdSlots canEdit={me?.rank === 'owner' || me?.rank === 'admin'} />
         <PriceWatchlist />
       </div>
     </BrandingProvider>
