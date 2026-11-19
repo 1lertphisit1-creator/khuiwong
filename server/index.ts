@@ -19,7 +19,8 @@ import {
   registerAccount,
 } from './auth.ts'
 import { EtfFeed, type EtfBoard } from './etf.ts'
-import { initForum, mountForum, presenceFromToken } from './forum.ts'
+import { initForum, mountForum, pageShare, presenceFromToken } from './forum.ts'
+import { canonicalUrl, injectShareMeta, isSharePath } from './shareHtml.ts'
 import { NewsFeed, newsConfig } from './news.ts'
 import { PriceFeed, type PriceBoard } from './prices.ts'
 import { musicSettings, saveMusicUrl, type MusicSetting } from './music.ts'
@@ -1770,6 +1771,34 @@ async function main() {
     })
   })
 
+  let transformHtml: ((url: string, html: string) => Promise<string>) | null = null
+  app.use((req, res, next) => {
+    if ((req.method !== 'GET' && req.method !== 'HEAD') || !isSharePath(req.path)) return next()
+    const accept = req.headers.accept ?? ''
+    if (accept.includes('application/json') && !accept.includes('text/html') && !accept.includes('*/*')) return next()
+    try {
+      const template = readShareTemplate(isProd)
+      const page = pageShare(req.path)
+      const origin = `${req.protocol}://${req.get('host') || 'localhost'}`
+      let html = injectShareMeta(template, page, canonicalUrl(origin, req.path))
+      const send = (body: string) => {
+        res.status(200)
+        res.setHeader('Content-Type', 'text/html; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.send(body)
+      }
+      if (!transformHtml) {
+        send(html)
+        return
+      }
+      void transformHtml(req.originalUrl, html)
+        .then(send)
+        .catch(next)
+    } catch (error) {
+      next(error)
+    }
+  })
+
   if (isProd) {
     const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'client')
     app.use(
@@ -1795,6 +1824,7 @@ async function main() {
       server: { middlewareMode: true, allowedHosts: true, ws: { server: httpServer } },
       appType: 'spa',
     })
+    transformHtml = (url, html) => vite.transformIndexHtml(url, html)
     app.use(vite.middlewares)
   }
 
@@ -1804,6 +1834,12 @@ async function main() {
     console.log(turn ? 'TURN configured' : 'TURN not set — using public STUN only')
     console.log(process.env.OWNER_SECRET ? 'OWNER_SECRET configured' : 'OWNER_SECRET not set')
   })
+}
+
+function readShareTemplate(prod: boolean) {
+  const bundled = path.join(path.dirname(fileURLToPath(import.meta.url)), 'client', 'index.html')
+  const file = prod && existsSync(bundled) ? bundled : path.resolve('index.html')
+  return readFileSync(file, 'utf8')
 }
 
 function chunkBuffer(chunk: unknown) {
