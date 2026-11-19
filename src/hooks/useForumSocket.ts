@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { io } from 'socket.io-client'
 import { isForumEvent, isForumOnline, publishForum } from '@/lib/forum.ts'
+import { isPriceBoard, publishPrices } from '@/lib/prices.ts'
 import { sessionToken } from '@/lib/session.ts'
 
 export function useForumSocket() {
@@ -13,6 +14,9 @@ export function useForumSocket() {
     })
     socket.on('forum-online', (payload: unknown) => {
       if (isForumOnline(payload)) publishForum({ type: 'online', online: payload })
+    })
+    socket.on('prices', (payload: unknown) => {
+      if (isPriceBoard(payload)) publishPrices(payload)
     })
     window.addEventListener('khuiwong-auth', announce)
     return () => {

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { BrandingProvider } from '@/components/forum/branding.tsx'
-import { ForumLink } from '@/components/forum/parts.tsx'
+import { ForumLink, MemberName } from '@/components/forum/parts.tsx'
+import { PriceWatchlist } from '@/components/PriceWatchlist.tsx'
 import {
   DEFAULT_BRANDING,
   forumGet,
@@ -123,7 +124,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
         <footer className="smf-footer" data-testid="forum-footer">
             <p>
               {stats ? `${stats.posts} Posts in ${stats.topics} Topics by ${stats.members} Members.` : '…'} Latest Member:{' '}
-              {stats?.latestMember ?? '—'}
+              {stats?.latestMember ? <MemberName name={stats.latestMember.name} color={stats.latestMember.color} /> : '—'}
             </p>
             <p>
               Users Online:{' '}
@@ -137,6 +138,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
             </p>
             <p className="smf-footer-brand" data-testid="forum-brand">{branding.forumName}</p>
         </footer>
+        <PriceWatchlist />
 
         <nav className="smf-tabbar lg:hidden" aria-label="Mobile">
           <button type="button" aria-current={homeCurrent ? 'page' : undefined} onClick={() => go('/')}>

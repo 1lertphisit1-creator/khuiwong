@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useBranding } from '@/components/forum/branding.tsx'
 import { renderBbcode } from '@/lib/bbcode.ts'
+import { inkColor } from '@/lib/forum.ts'
 import { go } from '@/lib/route.ts'
 import type { RankId } from '@/types.ts'
 
@@ -11,6 +12,10 @@ const STARS: Record<RankId, number> = {
   vip: 3,
   member: 1,
   guest: 0,
+}
+
+export function MemberName({ name, color }: { name: string; color?: string | null }) {
+  return <span style={{ color: inkColor(color || '#334466') }}>{name}</span>
 }
 
 export function ForumLink({

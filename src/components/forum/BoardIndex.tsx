@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Crumb, ForumLink } from '@/components/forum/parts.tsx'
+import { Crumb, ForumLink, MemberName } from '@/components/forum/parts.tsx'
 import {
   forumGet,
   forumSend,
@@ -101,7 +101,7 @@ function BoardRow({ board, stripe }: { board: ForumBoard; stripe: boolean }) {
       <td className="smf-last">
         {board.lastPost ? (
           <>
-            Last post by {board.lastPost.name}
+            Last post by <MemberName name={board.lastPost.name} color={board.lastPost.color} />
             <br />
             on {smfDate(board.lastPost.at)}
             <br />

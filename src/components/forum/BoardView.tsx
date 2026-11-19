@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Composer } from '@/components/forum/Composer.tsx'
-import { Crumb, ForumLink, Pages } from '@/components/forum/parts.tsx'
+import { Crumb, ForumLink, MemberName, Pages } from '@/components/forum/parts.tsx'
 import { forumGet, forumSend, onForum, smfDate, type BoardChoice, type ForumBoard, type ForumMe, type ForumTopic } from '@/lib/forum.ts'
 import { go } from '@/lib/route.ts'
 
@@ -139,11 +139,13 @@ function TopicRow({ topic, stripe }: { topic: ForumTopic; stripe: boolean }) {
           {topic.subject}
         </ForumLink>
       </td>
-      <td>{topic.authorName}</td>
+      <td>
+        <MemberName name={topic.authorName} color={topic.authorColor} />
+      </td>
       <td className="smf-count">{topic.replies}</td>
       <td className="smf-count">{topic.views}</td>
       <td className="smf-last">
-        Last post by {topic.lastPosterName}
+        Last post by <MemberName name={topic.lastPosterName} color={topic.lastPosterColor} />
         <br />
         on {smfDate(topic.lastPostAt)}
         <br />
