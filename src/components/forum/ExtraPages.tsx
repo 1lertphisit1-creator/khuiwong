@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AuthCard } from '@/components/AuthCard.tsx'
 import { useBranding } from '@/components/forum/branding.tsx'
 import { Crumb, ForumLink, MemberName } from '@/components/forum/parts.tsx'
+import { ActivityBlock } from '@/components/forum/Ranks.tsx'
 import { forumGet, forumSend, inkColor, smfDate, type ForumMe } from '@/lib/forum.ts'
 import { go } from '@/lib/route.ts'
 import { sessionToken } from '@/lib/session.ts'
@@ -197,6 +198,13 @@ function ProfileSettings() {
 
   return (
     <div className="smf-profile" data-testid="profile-settings">
+      {me.activity ? (
+        <ActivityBlock
+          activity={me.activity}
+          posts={me.posts}
+          staff={me.rank === 'owner' || me.rank === 'admin' || me.rank === 'moderator' ? me.rankLabel : null}
+        />
+      ) : null}
       <div className="smf-profile-avatar">
         {me.avatarUrl ? (
           <img className="smf-avatar" src={me.avatarUrl} alt="" width={80} height={80} data-testid="profile-avatar-preview" />

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Express, Request, Response } from 'express'
 import { accountFromToken, nicknameKey, siteOwnerUsername } from './auth.ts'
+import { activityRankById, activityRankForPosts, ACTIVITY_RANKS, type ActivityRank } from './activityRanks.ts'
 import { parseNameColor, storedHex } from './color.ts'
 import {
   avatarStamp,
@@ -34,6 +35,7 @@ export type ForumAuthor = {
   avatarUrl: string | null
   posts: number
   signature: string
+  activity: ActivityView | null
 }
 
 export type ForumPost = {
@@ -62,6 +64,18 @@ export type ForumMe = {
   guestPosting: boolean
   textMuted: boolean
   postBlock: string | null
+  activity: ActivityView | null
+  promotion: { title: string; nickname: string } | null
+}
+
+type ActivityView = {
+  id: string
+  title: string
+  nickname: string
+  kind: ActivityRank['kind']
+  marks: number
+  threshold: number
+  overridden: boolean
 }
 
 type TopicRow = {
@@ -189,6 +203,46 @@ export function mountForum(app: Express, io: Hub) {
 
   app.get('/api/forum/ads', (_req, res) => {
     res.json({ slots: listAds() })
+  })
+
+  app.get('/api/forum/ranks', (_req, res) => {
+    res.json({ ranks: ACTIVITY_RANKS })
+  })
+
+  app.post('/api/forum/promotion/ack', (req, res) => {
+    const actor = actorFor(req)
+    if (actor.accountId) sqlite().prepare('UPDATE accounts SET promotion_rank = NULL WHERE id = ?').run(actor.accountId)
+    res.json({ me: meFor(req) })
+  })
+
+  app.put('/api/forum/activity-rank', (req, res) => {
+    const actor = actorFor(req)
+    if (!actor.canModerate || rankLevel(actor.rank) < rankLevel('admin')) {
+      res.status(403).json({ message: 'เฉพาะผู้ดูแลแต่งตั้งยศได้' })
+      return
+    }
+    const nickname = cleanPlain(req.body?.nickname, 2, 24)
+    if (!nickname) {
+      res.status(400).json({ message: 'ไม่พบชื่อสมาชิกนี้' })
+      return
+    }
+    const account = findAccountByKey(nicknameKey(nickname))
+    if (!account) {
+      res.status(404).json({ message: 'ไม่พบชื่อสมาชิกนี้' })
+      return
+    }
+    const raw = req.body?.rank
+    if (raw == null || raw === '') {
+      sqlite().prepare('UPDATE accounts SET activity_rank = NULL WHERE id = ?').run(account.id)
+      res.json({ ok: true })
+      return
+    }
+    if (typeof raw !== 'string' || !activityRankById(raw)) {
+      res.status(400).json({ message: 'ไม่พบยศนี้' })
+      return
+    }
+    sqlite().prepare('UPDATE accounts SET activity_rank = ? WHERE id = ?').run(raw, account.id)
+    res.json({ ok: true, activity: activityFor(account.id) })
   })
 
   app.put('/api/forum/ads/:slot', (req, res) => {
@@ -369,8 +423,9 @@ export function mountForum(app: Express, io: Hub) {
       db.prepare(
         `INSERT INTO forum_posts (topic_id, author_account_id, author_name, author_rank, body, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, NULL)`,
-      ).run(topicId, author.accountId, author.name, author.rank, body, now).lastInsertRowid,
+      )      .run(topicId, author.accountId, author.name, author.rank, body, now).lastInsertRowid,
     )
+    notePromotion(author.accountId)
     const post = publicPost(getPost(postId)!)
     io.emit('forum-event', { type: 'post', topicId, boardId, post })
     io.emit('forum-event', { type: 'topic', topicId, boardId })
@@ -417,6 +472,7 @@ export function mountForum(app: Express, io: Hub) {
         )
         .run(topicId, author.accountId, author.name, author.rank, body, now).lastInsertRowid,
     )
+    notePromotion(author.accountId)
     refreshTopic(topicId)
     const post = publicPost(getPost(postId)!)
     const total = countPosts(topicId)
@@ -1015,6 +1071,8 @@ function meFor(req: Request): ForumMe {
     avatarUrl: avatarUrl(actor.accountId),
     posts,
     signature: signatureOf(actor.accountId),
+    activity: actor.accountId ? activityFor(actor.accountId) : null,
+    promotion: promotionFor(actor.accountId),
     canPost: !block,
     canModerate: actor.canModerate,
     canRename: actor.rank === 'owner',
@@ -1204,6 +1262,7 @@ function publicPost(row: PostRow): ForumPost {
       avatarUrl: avatarUrl(row.author_account_id),
       posts: row.author_account_id ? postCount(row.author_account_id) : 0,
       signature: signatureOf(row.author_account_id),
+      activity: row.author_account_id ? activityFor(row.author_account_id) : null,
     },
   }
 }
@@ -1235,6 +1294,46 @@ function deleteTopic(topicId: number) {
   const db = sqlite()
   db.prepare('DELETE FROM forum_posts WHERE topic_id = ?').run(topicId)
   db.prepare('DELETE FROM forum_topics WHERE id = ?').run(topicId)
+}
+
+function isSiteOwnerId(accountId: string) {
+  const owner = findAccountByKey(nicknameKey(siteOwnerUsername()))
+  return Boolean(owner && owner.id === accountId)
+}
+
+function activityFor(accountId: string): ActivityView {
+  const posts = postCount(accountId)
+  const account = findAccountById(accountId)
+  const override = activityRankById(account?.activity_rank)
+  const rank = override ?? (isSiteOwnerId(accountId) ? activityRankById('marshal')! : activityRankForPosts(posts))
+  return {
+    id: rank.id,
+    title: rank.title,
+    nickname: rank.nickname,
+    kind: rank.kind,
+    marks: rank.marks,
+    threshold: rank.threshold,
+    overridden: Boolean(override),
+  }
+}
+
+function promotionFor(accountId: string | null) {
+  if (!accountId) return null
+  const account = findAccountById(accountId)
+  const rank = activityRankById(account?.promotion_rank)
+  if (!rank) return null
+  return { title: rank.title, nickname: rank.nickname }
+}
+
+function notePromotion(accountId: string | null) {
+  if (!accountId || isSiteOwnerId(accountId)) return
+  const account = findAccountById(accountId)
+  if (!account || account.activity_rank) return
+  const posts = postCount(accountId)
+  const next = activityRankForPosts(posts)
+  const prev = activityRankForPosts(Math.max(0, posts - 1))
+  if (next.id === prev.id) return
+  sqlite().prepare('UPDATE accounts SET promotion_rank = ? WHERE id = ?').run(next.id, accountId)
 }
 
 function postCount(accountId: string) {

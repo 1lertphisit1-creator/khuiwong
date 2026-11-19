@@ -1,6 +1,18 @@
 import type { RankId } from '@/types.ts'
 import { api } from '@/lib/session.ts'
 
+export type ActivityKind = 'plain' | 'chevron' | 'pip' | 'flower' | 'star'
+
+export type ActivityView = {
+  id: string
+  title: string
+  nickname: string
+  kind: ActivityKind
+  marks: number
+  threshold: number
+  overridden?: boolean
+}
+
 export type ForumAuthor = {
   accountId: string | null
   name: string
@@ -10,6 +22,7 @@ export type ForumAuthor = {
   avatarUrl: string | null
   posts: number
   signature: string
+  activity: ActivityView | null
 }
 
 export type ForumPost = {
@@ -73,6 +86,8 @@ export type ForumMe = {
   guestPosting: boolean
   textMuted: boolean
   postBlock: string | null
+  activity: ActivityView | null
+  promotion: { title: string; nickname: string } | null
 }
 
 export type ForumBranding = {

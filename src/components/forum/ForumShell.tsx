@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { BrandingProvider } from '@/components/forum/branding.tsx'
 import { ForumLink, MemberName } from '@/components/forum/parts.tsx'
+import { PromotionNotice } from '@/components/forum/Ranks.tsx'
 import { AdSlots, VisitCounter } from '@/components/forum/SiteExtras.tsx'
 import { PriceWatchlist } from '@/components/PriceWatchlist.tsx'
 import {
   DEFAULT_BRANDING,
   forumGet,
+  forumSend,
   inkColor,
   onForum,
   publishForum,
@@ -120,6 +122,16 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
           </nav>
         </header>
         <VisitCounter route={route} online={online?.total ?? null} />
+        {me?.promotion ? (
+          <PromotionNotice
+            promotion={me.promotion}
+            onDone={() => {
+              void forumSend<{ me: ForumMe }>('/api/forum/promotion/ack', 'POST').then((payload) => {
+                setMe(payload.me)
+              })
+            }}
+          />
+        ) : null}
 
         <div className="smf-layout">{children}</div>
 
@@ -139,6 +151,11 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
               ))}
             </p>
             <p className="smf-footer-brand" data-testid="forum-brand">{branding.forumName}</p>
+            <p>
+              <ForumLink to="/ranks" testId="nav-ranks">
+                ยศทั้งหมด
+              </ForumLink>
+            </p>
         </footer>
         <AdSlots />
         <PriceWatchlist />

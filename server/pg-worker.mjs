@@ -178,6 +178,11 @@ async function migrate() {
     ],
     ['004_name_color', `ALTER TABLE accounts ADD COLUMN IF NOT EXISTS name_color TEXT;`],
     [
+      '006_activity_ranks',
+      `ALTER TABLE accounts ADD COLUMN IF NOT EXISTS activity_rank TEXT;
+      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS promotion_rank TEXT;`,
+    ],
+    [
       '005_views_ads',
       `CREATE TABLE IF NOT EXISTS page_counters (
         key TEXT PRIMARY KEY,

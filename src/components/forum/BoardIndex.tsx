@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Crumb, ForumLink, MemberName } from '@/components/forum/parts.tsx'
+import { AppointRank } from '@/components/forum/Ranks.tsx'
 import { AdAdmin } from '@/components/forum/SiteExtras.tsx'
 import {
   forumGet,
@@ -153,6 +154,7 @@ export function ForumAdminPage() {
         guestPosting={data.me.guestPosting}
         branding={data.branding}
         canRename={data.me.canRename}
+        canAppoint={data.me.rank === 'owner' || data.me.rank === 'admin'}
         onChanged={() => void load()}
       />
     </div>
@@ -164,12 +166,14 @@ function AdminBox({
   guestPosting,
   branding,
   canRename,
+  canAppoint,
   onChanged,
 }: {
   categories: ForumCategory[]
   guestPosting: boolean
   branding: ForumBranding
   canRename: boolean
+  canAppoint: boolean
   onChanged: () => void
 }) {
   const [categoryName, setCategoryName] = useState('')
@@ -217,6 +221,7 @@ function AdminBox({
         </label>
         {canRename ? <NameSettings branding={branding} run={run} /> : null}
         {canRename ? <AdAdmin /> : null}
+        {canAppoint ? <AppointRank /> : null}
         <form
           className="smf-inline"
           onSubmit={(event) => {
