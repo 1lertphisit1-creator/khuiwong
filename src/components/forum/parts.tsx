@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useBranding } from '@/components/forum/branding.tsx'
 import { renderBbcode } from '@/lib/bbcode.ts'
 import { go } from '@/lib/route.ts'
 import type { RankId } from '@/types.ts'
@@ -43,9 +44,10 @@ export function ForumLink({
 }
 
 export function Crumb({ items }: { items: { label: string; href?: string }[] }) {
+  const { forumName } = useBranding()
   return (
     <p data-testid="forum-crumb" className="smf-crumb">
-      <ForumLink to="/">FIBO99 Forum</ForumLink>
+      <ForumLink to="/">{forumName}</ForumLink>
       {items.map((item) => (
         <span key={`${item.href ?? ''}-${item.label}`}>
           {' » '}

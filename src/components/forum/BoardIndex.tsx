@@ -7,6 +7,7 @@ import {
   smfDate,
   type ForumBoard,
   type ForumCategory,
+  type ForumBranding,
   type ForumMe,
   type ForumStats,
 } from '@/lib/forum.ts'
@@ -15,6 +16,7 @@ type IndexPayload = {
   categories: ForumCategory[]
   me: ForumMe
   stats: ForumStats
+  branding: ForumBranding
 }
 
 export function BoardIndex() {
@@ -84,7 +86,15 @@ export function BoardIndex() {
           </table>
         </section>
       ))}
-      {moderate && data.me.canModerate ? <AdminBox categories={data.categories} guestPosting={data.me.guestPosting} onChanged={() => void load()} /> : null}
+      {moderate && data.me.canModerate ? (
+        <AdminBox
+          categories={data.categories}
+          guestPosting={data.me.guestPosting}
+          branding={data.branding}
+          canRename={data.me.canRename}
+          onChanged={() => void load()}
+        />
+      ) : null}
     </div>
   )
 }
@@ -125,10 +135,14 @@ function BoardRow({ board, stripe }: { board: ForumBoard; stripe: boolean }) {
 function AdminBox({
   categories,
   guestPosting,
+  branding,
+  canRename,
   onChanged,
 }: {
   categories: ForumCategory[]
   guestPosting: boolean
+  branding: ForumBranding
+  canRename: boolean
   onChanged: () => void
 }) {
   const [categoryName, setCategoryName] = useState('')
@@ -174,6 +188,7 @@ function AdminBox({
           />
           Allow guests to post
         </label>
+        {canRename ? <NameSettings branding={branding} run={run} /> : null}
         <form
           className="smf-inline"
           onSubmit={(event) => {
@@ -195,6 +210,40 @@ function AdminBox({
         {error ? <p className="smf-error">{error}</p> : null}
       </div>
     </section>
+  )
+}
+
+function NameSettings({ branding, run }: { branding: ForumBranding; run: (task: () => Promise<unknown>) => Promise<void> }) {
+  const [siteName, setSiteName] = useState(branding.siteName)
+  const [forumName, setForumName] = useState(branding.forumName)
+  const stamp = `${branding.siteName}|${branding.forumName}`
+  const [seen, setSeen] = useState(stamp)
+  if (stamp !== seen) {
+    setSeen(stamp)
+    setSiteName(branding.siteName)
+    setForumName(branding.forumName)
+  }
+
+  return (
+    <form
+      className="smf-inline"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void run(() => forumSend('/api/forum/settings', 'PUT', { siteName, forumName }))
+      }}
+    >
+      <label className="smf-field">
+        <span>Site name</span>
+        <input className="smf-input" value={siteName} maxLength={40} aria-label="ชื่อเว็บ" data-testid="site-name" onChange={(event) => setSiteName(event.target.value)} />
+      </label>
+      <label className="smf-field">
+        <span>Forum name</span>
+        <input className="smf-input" value={forumName} maxLength={40} aria-label="ชื่อฟอรัม" data-testid="forum-name" onChange={(event) => setForumName(event.target.value)} />
+      </label>
+      <button type="submit" className="smf-button" data-testid="save-names">
+        Save names
+      </button>
+    </form>
   )
 }
 
