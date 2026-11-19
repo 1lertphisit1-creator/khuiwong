@@ -1768,6 +1768,16 @@ async function main() {
     }
   })
 
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next()
+    if (!/\.(?:png|jpe?g|webp|gif|svg|ico|avif)$/i.test(req.path)) return next()
+    const relative = req.path.replace(/^\/+/, '')
+    const publicFile = path.resolve('public', relative)
+    const builtFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'client', relative)
+    if (existsSync(publicFile) || existsSync(builtFile)) return next()
+    res.status(404).type('text/plain').send('Not found')
+  })
+
   if (isProd) {
     const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'client')
     app.use(
