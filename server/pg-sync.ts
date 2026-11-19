@@ -23,6 +23,7 @@ type WorkerResponse = {
 
 export function createPgDatabase(): SqlDatabase {
   const worker = new Worker(path.resolve('server/pg-worker.mjs'))
+  warmWorker = worker
   worker.unref()
   const database: SqlDatabase = {
     exec(sql: string) {
@@ -53,15 +54,28 @@ export function createPgDatabase(): SqlDatabase {
   return database
 }
 
-function callWorker(worker: Worker, message: { op: string; sql: string; params?: unknown[] }): WorkerResponse {
+function callWorker(
+  worker: Worker,
+  message: { op: string; sql: string; params?: unknown[] },
+  timeoutMs = 30_000,
+): WorkerResponse {
   const { port1, port2 } = new MessageChannel()
   worker.postMessage({ ...message, port: port2 }, [port2])
   const pause = new Int32Array(new SharedArrayBuffer(4))
   const started = Date.now()
-  while (Date.now() - started < 30_000) {
+  while (Date.now() - started < timeoutMs) {
     const received = receiveMessageOnPort(port1)
     if (received) return received.message as WorkerResponse
     Atomics.wait(pause, 0, 0, 15)
   }
   throw new Error('PostgreSQL query timed out')
 }
+
+export function pingDatabase(timeoutMs = 2000) {
+  const worker = warmWorker
+  if (!worker) throw new Error('PostgreSQL is not open')
+  const result = callWorker(worker, { op: 'get', sql: 'SELECT 1 AS ok', params: [] }, timeoutMs)
+  if (!result.ok) throw new Error(result.error || 'PostgreSQL ping failed')
+}
+
+let warmWorker: Worker | null = null

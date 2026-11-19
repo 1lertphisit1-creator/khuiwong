@@ -15,11 +15,15 @@ export function useForumSocket() {
     socket.on('forum-online', (payload: unknown) => {
       if (isForumOnline(payload)) publishForum({ type: 'online', online: payload })
     })
-    socket.on('prices', (payload: unknown) => {
-      if (isPriceBoard(payload)) publishPrices(payload)
-    })
+    const armPrices = () => {
+      socket.on('prices', (payload: unknown) => {
+        if (isPriceBoard(payload)) publishPrices(payload)
+      })
+    }
+    const priceWait = window.setTimeout(armPrices, 400)
     window.addEventListener('khuiwong-auth', announce)
     return () => {
+      window.clearTimeout(priceWait)
       window.removeEventListener('khuiwong-auth', announce)
       socket.close()
     }

@@ -185,6 +185,15 @@ function initSqliteForum() {
 }
 
 export function mountForum(app: Express, io: Hub) {
+  app.use((req, res, next) => {
+    res.on('finish', () => {
+      if (req.method === 'GET' || req.method === 'HEAD' || res.statusCode >= 400) return
+      if (req.path.endsWith('/views') || req.path.endsWith('/view')) return
+      forgetForumReads()
+    })
+    next()
+  })
+
   app.get('/api/forum', (req, res) => {
     res.json({ categories: listCategories(), me: meFor(req), stats: forumStats(), branding: forumBranding() })
   })
@@ -1162,67 +1171,105 @@ function tooFast(actor: Actor) {
   return false
 }
 
+const HOT_MS = 8_000
+const hotCache = new Map<string, { at: number; value: unknown }>()
+
+function remember<T>(key: string, load: () => T): T {
+  const hit = hotCache.get(key)
+  if (hit && Date.now() - hit.at < HOT_MS) return hit.value as T
+  const value = load()
+  hotCache.set(key, { at: Date.now(), value })
+  return value
+}
+
+function forgetForumReads() {
+  hotCache.delete('categories')
+  hotCache.delete('stats')
+  colorCache = null
+}
+
 function listCategories() {
+  return remember('categories', buildCategories)
+}
+
+function buildCategories() {
   const categories = sqlite().prepare('SELECT id, name, position FROM forum_categories ORDER BY position ASC, id ASC').all() as {
     id: number
     name: string
     position: number
   }[]
+  const boards = sqlite()
+    .prepare('SELECT id, category_id, name, description, position FROM forum_boards ORDER BY position ASC, id ASC')
+    .all() as { id: number; category_id: number; name: string; description: string; position: number }[]
+  const counts = sqlite()
+    .prepare(
+      `SELECT t.board_id AS id, COUNT(DISTINCT t.id) AS topics, COUNT(p.id) AS posts
+       FROM forum_topics t
+       LEFT JOIN forum_posts p ON p.topic_id = t.id
+       GROUP BY t.board_id`,
+    )
+    .all() as { id: number; topics: number; posts: number }[]
+  const lasts = sqlite()
+    .prepare(
+      `SELECT t.board_id, t.id, t.subject, t.last_poster_name, t.last_post_at, t.reply_count
+       FROM forum_topics t
+       JOIN (
+         SELECT board_id, MAX(last_post_at) AS last_post_at FROM forum_topics GROUP BY board_id
+       ) latest ON latest.board_id = t.board_id AND latest.last_post_at = t.last_post_at`,
+    )
+    .all() as {
+    board_id: number
+    id: number
+    subject: string
+    last_poster_name: string
+    last_post_at: number
+    reply_count: number
+  }[]
+  const countByBoard = new Map(counts.map((row) => [Number(row.id), row]))
+  const lastByBoard = new Map<number, (typeof lasts)[number]>()
+  for (const row of lasts) {
+    const current = lastByBoard.get(Number(row.board_id))
+    if (!current || row.id > current.id) lastByBoard.set(Number(row.board_id), row)
+  }
+  const colors = colorsForNames(lasts.map((row) => row.last_poster_name))
   return categories.map((category) => ({
     id: category.id,
     name: category.name,
     position: category.position,
-    boards: boardsIn(category.id),
+    boards: boards
+      .filter((board) => board.category_id === category.id)
+      .map((board) => {
+        const count = countByBoard.get(board.id)
+        const last = lastByBoard.get(board.id)
+        return {
+          id: board.id,
+          categoryId: board.category_id,
+          name: board.name,
+          description: board.description,
+          position: board.position,
+          topics: Number(count?.topics ?? 0),
+          posts: Number(count?.posts ?? 0),
+          lastPost: last
+            ? {
+                topicId: last.id,
+                subject: last.subject,
+                name: last.last_poster_name,
+                color: colors.get(nicknameKey(last.last_poster_name)) ?? cachedRankColors().guest,
+                at: last.last_post_at,
+                page: Math.max(1, Math.ceil((last.reply_count + 1) / POST_PAGE)),
+              }
+            : null,
+        }
+      }),
   }))
 }
 
-function boardsIn(categoryId: number) {
-  const boards = sqlite()
-    .prepare('SELECT id, category_id, name, description, position FROM forum_boards WHERE category_id = ? ORDER BY position ASC, id ASC')
-    .all(categoryId) as { id: number; category_id: number; name: string; description: string; position: number }[]
-  return boards.map((board) => boardSummary(board))
-}
-
-function boardSummary(board: { id: number; category_id: number; name: string; description: string; position: number }) {
-  const counts = sqlite()
-    .prepare(
-      `SELECT
-         (SELECT COUNT(*) FROM forum_topics WHERE board_id = ?) AS topics,
-         (SELECT COUNT(*) FROM forum_posts p JOIN forum_topics t ON t.id = p.topic_id WHERE t.board_id = ?) AS posts`,
-    )
-    .get(board.id, board.id) as { topics: number; posts: number }
-  const last = sqlite()
-    .prepare(
-      `SELECT id, subject, last_poster_name, last_post_at, reply_count
-       FROM forum_topics WHERE board_id = ? ORDER BY last_post_at DESC LIMIT 1`,
-    )
-    .get(board.id) as { id: number; subject: string; last_poster_name: string; last_post_at: number; reply_count: number } | undefined
-  return {
-    id: board.id,
-    categoryId: board.category_id,
-    name: board.name,
-    description: board.description,
-    position: board.position,
-    topics: counts.topics,
-    posts: counts.posts,
-    lastPost: last
-      ? {
-          topicId: last.id,
-          subject: last.subject,
-          name: last.last_poster_name,
-          color: displayColor(null, last.last_poster_name),
-          at: last.last_post_at,
-          page: Math.max(1, Math.ceil((last.reply_count + 1) / POST_PAGE)),
-        }
-      : null,
-  }
-}
-
 function getBoard(id: number) {
-  const row = sqlite()
-    .prepare('SELECT id, category_id, name, description, position FROM forum_boards WHERE id = ?')
-    .get(id) as { id: number; category_id: number; name: string; description: string; position: number } | undefined
-  return row ? boardSummary(row) : undefined
+  for (const category of listCategories()) {
+    const board = category.boards.find((item) => item.id === id)
+    if (board) return board
+  }
+  return undefined
 }
 
 function getCategory(id: number) {
@@ -1251,7 +1298,15 @@ function listTopics(boardId: number, sticky: boolean, offset: number, limit: num
        LIMIT ? OFFSET ?`,
     )
     .all(boardId, sticky ? 1 : 0, limit, offset) as TopicRow[]
-  return rows.map(publicTopic)
+  const authorColors = colorsForIds(rows.map((row) => row.author_account_id).filter((id): id is string => Boolean(id)))
+  const nameColors = colorsForNames(rows.map((row) => row.last_poster_name))
+  return rows.map((row) =>
+    publicTopic(
+      row,
+      row.author_account_id ? authorColors.get(row.author_account_id) : undefined,
+      nameColors.get(nicknameKey(row.last_poster_name)),
+    ),
+  )
 }
 
 function countTopics(boardId: number, sticky: boolean) {
@@ -1266,14 +1321,14 @@ function getTopic(id: number) {
   return row ? publicTopic(row) : undefined
 }
 
-function publicTopic(row: TopicRow) {
+function publicTopic(row: TopicRow, authorColor?: string, lastPosterColor?: string) {
   const rank = isRankId(row.author_rank) ? row.author_rank : 'member'
   return {
     id: row.id,
     boardId: row.board_id,
     subject: row.subject,
     authorName: row.author_name,
-    authorColor: displayColor(row.author_account_id, row.author_name),
+    authorColor: authorColor ?? displayColor(row.author_account_id, row.author_name),
     authorRank: rank,
     sticky: row.sticky === 1,
     locked: row.locked === 1,
@@ -1282,7 +1337,7 @@ function publicTopic(row: TopicRow) {
     createdAt: row.created_at,
     lastPostAt: row.last_post_at,
     lastPosterName: row.last_poster_name,
-    lastPosterColor: displayColor(null, row.last_poster_name),
+    lastPosterColor: lastPosterColor ?? displayColor(null, row.last_poster_name),
   }
 }
 
@@ -1290,17 +1345,34 @@ function listPosts(topicId: number, offset: number, limit: number) {
   const rows = sqlite()
     .prepare('SELECT * FROM forum_posts WHERE topic_id = ? ORDER BY id ASC LIMIT ? OFFSET ?')
     .all(topicId, limit, offset) as PostRow[]
-  return rows.map(publicPost)
+  return postsPublic(rows)
 }
 
 function getPost(id: number) {
   return sqlite().prepare('SELECT * FROM forum_posts WHERE id = ?').get(id) as PostRow | undefined
 }
 
-function publicPost(row: PostRow): ForumPost {
-  const profile = identity(row.author_account_id, row.author_name)
-  const rank = row.author_account_id ? profile.rank : isRankId(row.author_rank) ? row.author_rank : 'guest'
-  const colors = getRankColors(FORUM_ROOM)
+function postsPublic(rows: PostRow[]): ForumPost[] {
+  const ids = rows.map((row) => row.author_account_id).filter((id): id is string => Boolean(id))
+  const directory = loadAuthors(ids)
+  return rows.map((row) => publicPost(row, directory))
+}
+
+function publicPost(row: PostRow, directory = loadAuthors(row.author_account_id ? [row.author_account_id] : [])): ForumPost {
+  const authorId = row.author_account_id
+  const known = authorId ? directory.accounts.get(authorId) : undefined
+  const member = authorId ? directory.members.get(authorId) : undefined
+  const colors = directory.colors
+  let rank: RankId = 'guest'
+  if (authorId) {
+    rank = authorId === directory.ownerId ? 'owner' : member && isRankId(member.rank) ? member.rank : 'member'
+  } else if (isRankId(row.author_rank)) rank = row.author_rank
+  const posts = authorId ? (directory.counts.get(authorId) ?? 0) : 0
+  const override = activityRankById(known?.activity_rank)
+  const activityRank = authorId
+    ? (override ?? (authorId === directory.ownerId ? activityRankById('marshal')! : activityRankForPosts(posts)))
+    : null
+  const stamp = authorId ? directory.avatars.get(authorId) : 0
   return {
     id: row.id,
     topicId: row.topic_id,
@@ -1308,17 +1380,103 @@ function publicPost(row: PostRow): ForumPost {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     author: {
-      accountId: row.author_account_id,
-      name: row.author_account_id ? profile.name : row.author_name,
+      accountId: authorId,
+      name: known?.nickname ?? row.author_name,
       rank,
       rankLabel: rankLabel(rank),
-      color: row.author_account_id ? profile.color : colors[rank],
-      avatarUrl: avatarUrl(row.author_account_id),
-      posts: row.author_account_id ? postCount(row.author_account_id) : 0,
-      signature: signatureOf(row.author_account_id),
-      activity: row.author_account_id ? activityFor(row.author_account_id) : null,
+      color: storedHex(member?.name_color) || storedHex(known?.name_color) || colors[rank],
+      avatarUrl: authorId && stamp ? `/api/avatars/${authorId}?v=${stamp}` : null,
+      posts,
+      signature: (known?.signature ?? '').slice(0, 300),
+      activity: activityRank
+        ? {
+            id: activityRank.id,
+            title: activityRank.title,
+            nickname: activityRank.nickname,
+            kind: activityRank.kind,
+            marks: activityRank.marks,
+            threshold: activityRank.threshold,
+            overridden: Boolean(override),
+          }
+        : null,
     },
   }
+}
+
+function loadAuthors(ids: string[]) {
+  const unique = [...new Set(ids.filter(Boolean))]
+  const colors = cachedRankColors()
+  const ownerId = siteOwnerId()
+  const accounts = new Map<string, { nickname: string; name_color: string | null; activity_rank: string | null; signature: string | null }>()
+  const members = new Map<string, { rank: string; name_color: string | null }>()
+  const avatars = new Map<string, number>()
+  const counts = new Map<string, number>()
+  if (unique.length > 0) {
+    const marks = unique.map(() => '?').join(', ')
+    const accountRows = sqlite()
+      .prepare(`SELECT id, nickname, name_color, activity_rank, signature FROM accounts WHERE id IN (${marks})`)
+      .all(...unique) as { id: string; nickname: string; name_color: string | null; activity_rank: string | null; signature: string | null }[]
+    for (const row of accountRows) accounts.set(row.id, row)
+    const memberRows = sqlite()
+      .prepare(`SELECT account_id, rank, name_color FROM room_members WHERE room_id = ? AND account_id IN (${marks})`)
+      .all(FORUM_ROOM, ...unique) as { account_id: string; rank: string; name_color: string | null }[]
+    for (const row of memberRows) members.set(row.account_id, row)
+    const avatarRows = sqlite()
+      .prepare(`SELECT account_id, updated_at FROM avatars WHERE account_id IN (${marks})`)
+      .all(...unique) as { account_id: string; updated_at: number }[]
+    for (const row of avatarRows) avatars.set(row.account_id, Number(row.updated_at))
+    const countRows = sqlite()
+      .prepare(`SELECT author_account_id AS id, COUNT(*) AS n FROM forum_posts WHERE author_account_id IN (${marks}) GROUP BY author_account_id`)
+      .all(...unique) as { id: string; n: number }[]
+    for (const row of countRows) counts.set(row.id, Number(row.n))
+  }
+  return { accounts, members, avatars, counts, colors, ownerId }
+}
+
+function colorsForIds(ids: string[]) {
+  const directory = loadAuthors(ids)
+  const colors = new Map<string, string>()
+  for (const id of ids) {
+    const account = directory.accounts.get(id)
+    const member = directory.members.get(id)
+    if (!account) continue
+    const rank: RankId = id === directory.ownerId ? 'owner' : member && isRankId(member.rank) ? member.rank : 'member'
+    colors.set(id, storedHex(member?.name_color) || storedHex(account.name_color) || directory.colors[rank])
+  }
+  return colors
+}
+
+function colorsForNames(names: string[]) {
+  const keys = [...new Set(names.filter(Boolean).map((name) => nicknameKey(name)))]
+  const colors = new Map<string, string>()
+  if (keys.length === 0) return colors
+  const marks = keys.map(() => '?').join(', ')
+  const accounts = sqlite()
+    .prepare(`SELECT id, nickname_key, name_color FROM accounts WHERE nickname_key IN (${marks})`)
+    .all(...keys) as { id: string; nickname_key: string; name_color: string | null }[]
+  const byId = colorsForIds(accounts.map((account) => account.id))
+  for (const account of accounts) {
+    const color = byId.get(account.id)
+    if (color) colors.set(account.nickname_key, color)
+  }
+  return colors
+}
+
+let colorCache: { at: number; colors: ReturnType<typeof getRankColors> } | null = null
+let ownerCache: { at: number; id: string | null } | null = null
+
+function cachedRankColors() {
+  if (colorCache && Date.now() - colorCache.at < 60_000) return colorCache.colors
+  const colors = getRankColors(FORUM_ROOM)
+  colorCache = { at: Date.now(), colors }
+  return colors
+}
+
+function siteOwnerId() {
+  if (ownerCache && Date.now() - ownerCache.at < 60_000) return ownerCache.id
+  const owner = findAccountByKey(nicknameKey(siteOwnerUsername()))
+  ownerCache = { at: Date.now(), id: owner?.id ?? null }
+  return ownerCache.id
 }
 
 function countPosts(topicId: number) {
@@ -1406,6 +1564,10 @@ function signatureOf(accountId: string | null) {
 }
 
 function forumStats() {
+  return remember('stats', readForumStats)
+}
+
+function readForumStats() {
   const posts = (sqlite().prepare('SELECT COUNT(*) AS n FROM forum_posts').get() as { n: number }).n
   const topics = (sqlite().prepare('SELECT COUNT(*) AS n FROM forum_topics').get() as { n: number }).n
   const members = (sqlite().prepare('SELECT COUNT(*) AS n FROM accounts').get() as { n: number }).n
@@ -1498,6 +1660,10 @@ function cleanViewPath(input: unknown) {
 }
 
 function viewTotals() {
+  return remember('views', readViewTotals)
+}
+
+function readViewTotals() {
   const totalRow = sqlite().prepare(`SELECT value FROM page_counters WHERE key = 'total'`).get() as { value: number } | undefined
   const todayRow = sqlite().prepare('SELECT views FROM page_view_days WHERE day = ?').get(bangkokDay()) as { views: number } | undefined
   return { total: Number(totalRow?.value ?? 0), today: Number(todayRow?.views ?? 0) }
@@ -1522,9 +1688,11 @@ function recordPageView(visitor: string, path: string) {
     db.prepare(
       `INSERT INTO page_view_days (day, views) VALUES (?, 1)
        ON CONFLICT(day) DO UPDATE SET views = page_view_days.views + 1`,
-    ).run(bangkokDay(now))
+    )    .run(bangkokDay(now))
   }
-  return viewTotals()
+  const totals = readViewTotals()
+  hotCache.set('views', { at: Date.now(), value: totals })
+  return totals
 }
 
 function listAds() {

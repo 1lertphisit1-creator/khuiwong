@@ -19,6 +19,8 @@ import {
   registerAccount,
 } from './auth.ts'
 import { compressAvatar } from './avatar.ts'
+import { compressResponses } from './compress.ts'
+import { pingDatabase } from './pg-sync.ts'
 import { initForum, mountForum, pageShare, presenceFromToken } from './forum.ts'
 import { clearForumPresence, forumOnlineSnapshot, setForumPresence } from './presence.ts'
 import { canonicalUrl, injectShareMeta, isSharePath } from './shareHtml.ts'
@@ -51,6 +53,7 @@ import {
   updateMemberFlags,
   updateMemberRank,
   readAvatar,
+  sqlite,
   upsertMember,
   usingPostgres,
   writeAvatar,
@@ -730,6 +733,7 @@ async function main() {
 
   app.set('trust proxy', 1)
   app.disable('x-powered-by')
+  if (isProd) app.use(compressResponses)
   app.use((req, _res, next) => {
     if ((req.url ?? '').startsWith('/socket.io')) return
     next()
@@ -741,6 +745,15 @@ async function main() {
   }
   app.get('/api/health', health)
   app.get('/health', health)
+  app.get('/healthz', (_req, res) => {
+    try {
+      if (usingPostgres()) pingDatabase(2000)
+      else sqlite().prepare('SELECT 1 AS ok').get()
+      res.status(200).json({ ok: true })
+    } catch {
+      if (!res.headersSent) res.status(503).json({ ok: false })
+    }
+  })
 
   app.get('/api/rooms/active', (_req, res) => {
     const list = [...rooms.entries()]
@@ -1771,6 +1784,8 @@ async function main() {
         index: false,
         setHeaders(res, filePath) {
           if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache')
+          else if (filePath.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+          else if (/\.(?:png|jpe?g|webp|gif|svg|ico|avif|woff2?)$/i.test(filePath)) res.setHeader('Cache-Control', 'public, max-age=2592000')
           else res.setHeader('Cache-Control', 'public, max-age=3600')
         },
       }),
