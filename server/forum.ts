@@ -1,0 +1,1125 @@
+import { existsSync, statSync } from 'node:fs'
+import path from 'node:path'
+import type { Express, Request, Response } from 'express'
+import { accountFromToken, nicknameKey, siteOwnerUsername } from './auth.ts'
+import {
+  dataDir,
+  findAccountById,
+  findAccountByKey,
+  getMember,
+  getRankColors,
+  isAccountBanned,
+  sqlite,
+} from './db.ts'
+import { isRankId, rankLabel, rankLevel, type RankId } from './ranks.ts'
+
+const FORUM_ROOM = 'MAIN'
+const TOPIC_PAGE = 20
+const POST_PAGE = 15
+const lastPostAt = new Map<string, number>()
+const viewSeen = new Map<string, number>()
+
+type Hub = { emit: (event: string, payload: unknown) => void }
+
+export type ForumAuthor = {
+  accountId: string | null
+  name: string
+  rank: RankId
+  rankLabel: string
+  color: string
+  avatarUrl: string | null
+  posts: number
+  signature: string
+}
+
+export type ForumPost = {
+  id: number
+  topicId: number
+  body: string
+  createdAt: number
+  updatedAt: number | null
+  author: ForumAuthor
+}
+
+export type ForumMe = {
+  accountId: string | null
+  name: string
+  rank: RankId
+  rankLabel: string
+  color: string
+  avatarUrl: string | null
+  posts: number
+  signature: string
+  canPost: boolean
+  canModerate: boolean
+  guestPosting: boolean
+  textMuted: boolean
+  postBlock: string | null
+}
+
+type TopicRow = {
+  id: number
+  board_id: number
+  subject: string
+  author_account_id: string | null
+  author_name: string
+  author_rank: string
+  sticky: number
+  locked: number
+  views: number
+  reply_count: number
+  created_at: number
+  last_post_at: number
+  last_poster_name: string
+}
+
+type PostRow = {
+  id: number
+  topic_id: number
+  author_account_id: string | null
+  author_name: string
+  author_rank: string
+  body: string
+  created_at: number
+  updated_at: number | null
+}
+
+export function initForum() {
+  const db = sqlite()
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS forum_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS forum_boards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      position INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS forum_topics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      board_id INTEGER NOT NULL,
+      subject TEXT NOT NULL,
+      author_account_id TEXT,
+      author_name TEXT NOT NULL,
+      author_rank TEXT NOT NULL,
+      sticky INTEGER NOT NULL DEFAULT 0,
+      locked INTEGER NOT NULL DEFAULT 0,
+      views INTEGER NOT NULL DEFAULT 0,
+      reply_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      last_post_at INTEGER NOT NULL,
+      last_poster_name TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS forum_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic_id INTEGER NOT NULL,
+      author_account_id TEXT,
+      author_name TEXT NOT NULL,
+      author_rank TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS forum_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS forum_topics_board ON forum_topics (board_id, sticky, last_post_at);
+    CREATE INDEX IF NOT EXISTS forum_posts_topic ON forum_posts (topic_id, id);
+  `)
+  const accountColumns = db.prepare('PRAGMA table_info(accounts)').all() as { name: string }[]
+  if (!accountColumns.some((column) => column.name === 'signature')) {
+    db.exec('ALTER TABLE accounts ADD COLUMN signature TEXT')
+  }
+  const categories = db.prepare('SELECT COUNT(*) AS n FROM forum_categories').get() as { n: number }
+  if (categories.n === 0) seedForum()
+  if (!setting('guest_posting')) {
+    db.prepare('INSERT INTO forum_settings (key, value) VALUES (?, ?)').run('guest_posting', '0')
+  }
+}
+
+export function mountForum(app: Express, io: Hub) {
+  app.get('/api/forum', (req, res) => {
+    res.json({ categories: listCategories(), me: meFor(req), stats: forumStats() })
+  })
+
+  app.get('/api/forum/bootstrap', (req, res) => {
+    res.json({ me: meFor(req), stats: forumStats() })
+  })
+
+  app.get('/api/forum/boards/:id', (req, res) => {
+    const boardId = intId(req.params.id)
+    const board = boardId ? getBoard(boardId) : undefined
+    if (!board) {
+      res.status(404).json({ message: 'ไม่พบบอร์ดนี้' })
+      return
+    }
+    const page = pageParam(req.query.page)
+    const pageSize = TOPIC_PAGE
+    const total = countTopics(boardId, false)
+    const pages = Math.max(1, Math.ceil(total / pageSize))
+    const safePage = Math.min(page, pages)
+    res.json({
+      board,
+      category: getCategory(board.categoryId),
+      stickies: listTopics(boardId, true, 0, 100),
+      topics: listTopics(boardId, false, (safePage - 1) * pageSize, pageSize),
+      page: safePage,
+      pages,
+      me: meFor(req),
+      boards: boardChoices(),
+    })
+  })
+
+  app.get('/api/forum/topics/:id', (req, res) => {
+    const topicId = intId(req.params.id)
+    const topic = topicId ? getTopic(topicId) : undefined
+    if (!topic) {
+      res.status(404).json({ message: 'ไม่พบกระทู้นี้' })
+      return
+    }
+    const page = pageParam(req.query.page)
+    const total = countPosts(topicId)
+    const pages = Math.max(1, Math.ceil(total / POST_PAGE))
+    const safePage = Math.min(page, pages)
+    const board = getBoard(topic.boardId)
+    res.json({
+      topic,
+      board,
+      category: board ? getCategory(board.categoryId) : null,
+      posts: listPosts(topicId, (safePage - 1) * POST_PAGE, POST_PAGE),
+      page: safePage,
+      pages,
+      postPageSize: POST_PAGE,
+      me: meFor(req),
+      boards: boardChoices(),
+    })
+  })
+
+  app.post('/api/forum/topics/:id/view', (req, res) => {
+    const topicId = intId(req.params.id)
+    if (!topicId || !getTopic(topicId)) {
+      res.status(404).json({ message: 'ไม่พบกระทู้นี้' })
+      return
+    }
+    const key = `${requestIp(req)}:${topicId}`
+    const now = Date.now()
+    const seen = viewSeen.get(key) ?? 0
+    if (now - seen > 30 * 60 * 1000) {
+      viewSeen.set(key, now)
+      sqlite().prepare('UPDATE forum_topics SET views = views + 1 WHERE id = ?').run(topicId)
+    }
+    const topic = getTopic(topicId)
+    res.json({ views: topic?.views ?? 0 })
+  })
+
+  app.get('/api/forum/search', (req, res) => {
+    const query = cleanPlain(req.query.q, 2, 80)
+    if (!query) {
+      res.json({ query: '', results: [], me: meFor(req) })
+      return
+    }
+    const like = `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
+    const rows = sqlite()
+      .prepare(
+        `SELECT t.id AS topic_id, t.subject, t.board_id, b.name AS board_name, t.last_post_at, t.last_poster_name,
+                p.body AS body
+         FROM forum_posts p
+         JOIN forum_topics t ON t.id = p.topic_id
+         JOIN forum_boards b ON b.id = t.board_id
+         WHERE t.subject LIKE ? ESCAPE '\\' OR p.body LIKE ? ESCAPE '\\'
+         GROUP BY t.id
+         ORDER BY t.last_post_at DESC
+         LIMIT 30`,
+      )
+      .all(like, like) as {
+      topic_id: number
+      subject: string
+      board_id: number
+      board_name: string
+      last_post_at: number
+      last_poster_name: string
+      body: string
+    }[]
+    res.json({
+      query,
+      results: rows.map((row) => ({
+        topicId: row.topic_id,
+        subject: row.subject,
+        boardId: row.board_id,
+        boardName: row.board_name,
+        lastPostAt: row.last_post_at,
+        lastPosterName: row.last_poster_name,
+        snippet: snippet(row.body, query),
+      })),
+      me: meFor(req),
+    })
+  })
+
+  app.post('/api/forum/boards/:id/topics', (req, res) => {
+    const boardId = intId(req.params.id)
+    const board = boardId ? getBoard(boardId) : undefined
+    if (!board) {
+      res.status(404).json({ message: 'ไม่พบบอร์ดนี้' })
+      return
+    }
+    const actor = actorFor(req)
+    const blocked = postBlock(actor)
+    if (blocked) {
+      res.status(blocked.status).json({ message: blocked.message })
+      return
+    }
+    const subject = cleanPlain(req.body?.subject, 2, 80)
+    const body = cleanBody(req.body?.body)
+    if (!subject) {
+      res.status(400).json({ message: 'ตั้งชื่อกระทู้ 2–80 ตัวอักษร' })
+      return
+    }
+    if (!body) {
+      res.status(400).json({ message: 'เขียนข้อความก่อนโพสต์' })
+      return
+    }
+    const author = authorFrom(actor, req.body?.guestName)
+    if ('error' in author) {
+      res.status(400).json({ message: author.error })
+      return
+    }
+    if (tooFast(actor)) {
+      res.status(429).json({ message: 'โพสต์ถี่เกินไป รอสักครู่' })
+      return
+    }
+    const now = Date.now()
+    const db = sqlite()
+    const topicId = Number(
+      db.prepare(
+        `INSERT INTO forum_topics (
+          board_id, subject, author_account_id, author_name, author_rank, sticky, locked, views, reply_count, created_at, last_post_at, last_poster_name
+        ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)`,
+      ).run(boardId, subject, author.accountId, author.name, author.rank, now, now, author.name).lastInsertRowid,
+    )
+    const postId = Number(
+      db.prepare(
+        `INSERT INTO forum_posts (topic_id, author_account_id, author_name, author_rank, body, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+      ).run(topicId, author.accountId, author.name, author.rank, body, now).lastInsertRowid,
+    )
+    const post = publicPost(getPost(postId)!)
+    io.emit('forum-event', { type: 'post', topicId, boardId, post })
+    io.emit('forum-event', { type: 'topic', topicId, boardId })
+    res.status(201).json({ topicId, post, me: meFor(req) })
+  })
+
+  app.post('/api/forum/topics/:id/replies', (req, res) => {
+    const topicId = intId(req.params.id)
+    const topic = topicId ? getTopic(topicId) : undefined
+    if (!topic) {
+      res.status(404).json({ message: 'ไม่พบกระทู้นี้' })
+      return
+    }
+    const actor = actorFor(req)
+    if (topic.locked && !actor.canModerate) {
+      res.status(403).json({ message: 'กระทู้นี้ถูกล็อก' })
+      return
+    }
+    const blocked = postBlock(actor)
+    if (blocked) {
+      res.status(blocked.status).json({ message: blocked.message })
+      return
+    }
+    const body = cleanBody(req.body?.body)
+    if (!body) {
+      res.status(400).json({ message: 'เขียนข้อความก่อนโพสต์' })
+      return
+    }
+    const author = authorFrom(actor, req.body?.guestName)
+    if ('error' in author) {
+      res.status(400).json({ message: author.error })
+      return
+    }
+    if (tooFast(actor)) {
+      res.status(429).json({ message: 'โพสต์ถี่เกินไป รอสักครู่' })
+      return
+    }
+    const now = Date.now()
+    const postId = Number(
+      sqlite()
+        .prepare(
+          `INSERT INTO forum_posts (topic_id, author_account_id, author_name, author_rank, body, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+        )
+        .run(topicId, author.accountId, author.name, author.rank, body, now).lastInsertRowid,
+    )
+    refreshTopic(topicId)
+    const post = publicPost(getPost(postId)!)
+    const total = countPosts(topicId)
+    const page = Math.max(1, Math.ceil(total / POST_PAGE))
+    io.emit('forum-event', { type: 'post', topicId, boardId: topic.boardId, post })
+    io.emit('forum-event', { type: 'topic', topicId, boardId: topic.boardId })
+    res.status(201).json({ post, page, pages: page, me: meFor(req) })
+  })
+
+  app.put('/api/forum/posts/:id', (req, res) => {
+    const postId = intId(req.params.id)
+    const row = postId ? getPost(postId) : undefined
+    if (!row) {
+      res.status(404).json({ message: 'ไม่พบข้อความนี้' })
+      return
+    }
+    const actor = actorFor(req)
+    const topic = getTopic(row.topic_id)
+    if (!topic) {
+      res.status(404).json({ message: 'ไม่พบกระทู้นี้' })
+      return
+    }
+    const owns = Boolean(actor.accountId && actor.accountId === row.author_account_id)
+    if (!owns && !actor.canModerate) {
+      res.status(403).json({ message: 'แก้ได้เฉพาะข้อความของตัวเอง' })
+      return
+    }
+    const body = cleanBody(req.body?.body)
+    if (!body) {
+      res.status(400).json({ message: 'เขียนข้อความก่อนบันทึก' })
+      return
+    }
+    sqlite().prepare('UPDATE forum_posts SET body = ?, updated_at = ? WHERE id = ?').run(body, Date.now(), postId)
+    const first = firstPostId(topic.id)
+    const subject = cleanPlain(req.body?.subject, 2, 80)
+    if (first === postId && subject) {
+      sqlite().prepare('UPDATE forum_topics SET subject = ? WHERE id = ?').run(subject, topic.id)
+    }
+    const post = publicPost(getPost(postId)!)
+    io.emit('forum-event', { type: 'topic', topicId: topic.id, boardId: topic.boardId })
+    res.json({ post, me: meFor(req) })
+  })
+
+  app.delete('/api/forum/posts/:id', (req, res) => {
+    const actor = actorFor(req)
+    if (!actor.canModerate) {
+      res.status(403).json({ message: 'เฉพาะผู้ดูแลลบข้อความได้' })
+      return
+    }
+    const postId = intId(req.params.id)
+    const row = postId ? getPost(postId) : undefined
+    if (!row) {
+      res.status(404).json({ message: 'ไม่พบข้อความนี้' })
+      return
+    }
+    const topic = getTopic(row.topic_id)
+    if (!topic) {
+      res.status(404).json({ message: 'ไม่พบกระทู้นี้' })
+      return
+    }
+    const first = firstPostId(topic.id)
+    if (first === postId || countPosts(topic.id) <= 1) {
+      deleteTopic(topic.id)
+      io.emit('forum-event', { type: 'topic', topicId: topic.id, boardId: topic.boardId, deleted: true })
+      res.json({ topicDeleted: true })
+      return
+    }
+    sqlite().prepare('DELETE FROM forum_posts WHERE id = ?').run(postId)
+    refreshTopic(topic.id)
+    io.emit('forum-event', { type: 'topic', topicId: topic.id, boardId: topic.boardId })
+    res.json({ topicDeleted: false })
+  })
+
+  app.post('/api/forum/topics/:id/moderate', (req, res) => {
+    const actor = actorFor(req)
+    if (!actor.canModerate) {
+      res.status(403).json({ message: 'เฉพาะผู้ดูแลจัดการกระทู้ได้' })
+      return
+    }
+    const topicId = intId(req.params.id)
+    const topic = topicId ? getTopic(topicId) : undefined
+    if (!topic) {
+      res.status(404).json({ message: 'ไม่พบกระทู้นี้' })
+      return
+    }
+    const db = sqlite()
+    if (typeof req.body?.sticky === 'boolean') {
+      db.prepare('UPDATE forum_topics SET sticky = ? WHERE id = ?').run(req.body.sticky ? 1 : 0, topicId)
+    }
+    if (typeof req.body?.locked === 'boolean') {
+      db.prepare('UPDATE forum_topics SET locked = ? WHERE id = ?').run(req.body.locked ? 1 : 0, topicId)
+    }
+    let boardId = topic.boardId
+    if (req.body?.boardId != null) {
+      const nextBoard = intId(req.body.boardId)
+      if (!nextBoard || !getBoard(nextBoard)) {
+        res.status(400).json({ message: 'ไม่พบบอร์ดปลายทาง' })
+        return
+      }
+      db.prepare('UPDATE forum_topics SET board_id = ? WHERE id = ?').run(nextBoard, topicId)
+      boardId = nextBoard
+    }
+    if (req.body?.delete === true) {
+      deleteTopic(topicId)
+      io.emit('forum-event', { type: 'topic', topicId, boardId: topic.boardId, deleted: true })
+      res.json({ deleted: true })
+      return
+    }
+    io.emit('forum-event', { type: 'topic', topicId, boardId, fromBoardId: topic.boardId })
+    res.json({ topic: getTopic(topicId), me: meFor(req) })
+  })
+
+  app.post('/api/forum/categories', (req, res) => {
+    if (!requireMod(req, res)) return
+    const name = cleanPlain(req.body?.name, 2, 60)
+    if (!name) {
+      res.status(400).json({ message: 'ตั้งชื่อหมวด 2–60 ตัวอักษร' })
+      return
+    }
+    const position = nextPosition('forum_categories')
+    const id = Number(
+      sqlite().prepare('INSERT INTO forum_categories (name, position) VALUES (?, ?)').run(name, position).lastInsertRowid,
+    )
+    io.emit('forum-event', { type: 'boards' })
+    res.status(201).json({ id, categories: listCategories() })
+  })
+
+  app.put('/api/forum/categories/:id', (req, res) => {
+    if (!requireMod(req, res)) return
+    const id = intId(req.params.id)
+    if (!id || !getCategory(id)) {
+      res.status(404).json({ message: 'ไม่พบหมวดนี้' })
+      return
+    }
+    const name = cleanPlain(req.body?.name, 2, 60)
+    if (!name) {
+      res.status(400).json({ message: 'ตั้งชื่อหมวด 2–60 ตัวอักษร' })
+      return
+    }
+    sqlite().prepare('UPDATE forum_categories SET name = ? WHERE id = ?').run(name, id)
+    if (req.body?.direction === 'up' || req.body?.direction === 'down') moveRow('forum_categories', id, req.body.direction)
+    io.emit('forum-event', { type: 'boards' })
+    res.json({ categories: listCategories() })
+  })
+
+  app.delete('/api/forum/categories/:id', (req, res) => {
+    if (!requireMod(req, res)) return
+    const id = intId(req.params.id)
+    if (!id || !getCategory(id)) {
+      res.status(404).json({ message: 'ไม่พบหมวดนี้' })
+      return
+    }
+    const boards = sqlite().prepare('SELECT COUNT(*) AS n FROM forum_boards WHERE category_id = ?').get(id) as { n: number }
+    if (boards.n > 0) {
+      res.status(400).json({ message: 'ย้ายหรือลบบอร์ดในหมวดนี้ก่อน' })
+      return
+    }
+    sqlite().prepare('DELETE FROM forum_categories WHERE id = ?').run(id)
+    io.emit('forum-event', { type: 'boards' })
+    res.json({ categories: listCategories() })
+  })
+
+  app.post('/api/forum/boards', (req, res) => {
+    if (!requireMod(req, res)) return
+    const categoryId = intId(req.body?.categoryId)
+    if (!categoryId || !getCategory(categoryId)) {
+      res.status(400).json({ message: 'เลือกหมวดก่อน' })
+      return
+    }
+    const name = cleanPlain(req.body?.name, 2, 60)
+    const description = cleanPlain(req.body?.description, 0, 200) ?? ''
+    if (!name) {
+      res.status(400).json({ message: 'ตั้งชื่อบอร์ด 2–60 ตัวอักษร' })
+      return
+    }
+    const position = nextPosition('forum_boards', categoryId)
+    sqlite()
+      .prepare('INSERT INTO forum_boards (category_id, name, description, position) VALUES (?, ?, ?, ?)')
+      .run(categoryId, name, description, position)
+    io.emit('forum-event', { type: 'boards' })
+    res.status(201).json({ categories: listCategories() })
+  })
+
+  app.put('/api/forum/boards/:id', (req, res) => {
+    if (!requireMod(req, res)) return
+    const id = intId(req.params.id)
+    const board = id ? getBoard(id) : undefined
+    if (!board) {
+      res.status(404).json({ message: 'ไม่พบบอร์ดนี้' })
+      return
+    }
+    const name = cleanPlain(req.body?.name, 2, 60) ?? board.name
+    const description = req.body?.description == null ? board.description : (cleanPlain(req.body.description, 0, 200) ?? '')
+    let categoryId = board.categoryId
+    if (req.body?.categoryId != null) {
+      const next = intId(req.body.categoryId)
+      if (!next || !getCategory(next)) {
+        res.status(400).json({ message: 'ไม่พบหมวดปลายทาง' })
+        return
+      }
+      categoryId = next
+    }
+    sqlite()
+      .prepare('UPDATE forum_boards SET name = ?, description = ?, category_id = ? WHERE id = ?')
+      .run(name, description, categoryId, id)
+    if (req.body?.direction === 'up' || req.body?.direction === 'down') {
+      moveRow('forum_boards', id, req.body.direction, categoryId)
+    }
+    io.emit('forum-event', { type: 'boards' })
+    res.json({ categories: listCategories() })
+  })
+
+  app.delete('/api/forum/boards/:id', (req, res) => {
+    if (!requireMod(req, res)) return
+    const id = intId(req.params.id)
+    if (!id || !getBoard(id)) {
+      res.status(404).json({ message: 'ไม่พบบอร์ดนี้' })
+      return
+    }
+    const db = sqlite()
+    db.exec('BEGIN')
+    try {
+      db.prepare(
+        'DELETE FROM forum_posts WHERE topic_id IN (SELECT id FROM forum_topics WHERE board_id = ?)',
+      ).run(id)
+      db.prepare('DELETE FROM forum_topics WHERE board_id = ?').run(id)
+      db.prepare('DELETE FROM forum_boards WHERE id = ?').run(id)
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    io.emit('forum-event', { type: 'boards' })
+    res.json({ categories: listCategories() })
+  })
+
+  app.put('/api/forum/settings', (req, res) => {
+    if (!requireMod(req, res)) return
+    if (typeof req.body?.guestPosting === 'boolean') {
+      sqlite()
+        .prepare(
+          `INSERT INTO forum_settings (key, value) VALUES ('guest_posting', ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        )
+        .run(req.body.guestPosting ? '1' : '0')
+    }
+    io.emit('forum-event', { type: 'boards' })
+    res.json({ me: meFor(req) })
+  })
+
+  app.put('/api/forum/signature', (req, res) => {
+    const actor = actorFor(req)
+    if (!actor.accountId) {
+      res.status(401).json({ message: 'เข้าสู่ระบบก่อนตั้งลายเซ็น' })
+      return
+    }
+    const signature = cleanBody(req.body?.signature ?? '') ?? ''
+    if ([...signature].length > 300) {
+      res.status(400).json({ message: 'ลายเซ็นยาวได้ไม่เกิน 300 ตัวอักษร' })
+      return
+    }
+    sqlite().prepare('UPDATE accounts SET signature = ? WHERE id = ?').run(signature, actor.accountId)
+    res.json({ me: meFor(req) })
+  })
+}
+
+export function presenceFromToken(token: string | null | undefined) {
+  const account = token ? accountFromToken(token) : null
+  const actor = identity(account?.id ?? null, account?.nickname ?? 'Guest')
+  return {
+    accountId: actor.accountId,
+    name: actor.accountId ? actor.name : 'Guest',
+    rank: actor.rank,
+    color: actor.color,
+  }
+}
+
+function requireMod(req: Request, res: Response) {
+  if (!actorFor(req).canModerate) {
+    res.status(403).json({ message: 'เฉพาะผู้ดูแลจัดการบอร์ดได้' })
+    return false
+  }
+  return true
+}
+
+function seedForum() {
+  const db = sqlite()
+  const categories = [
+    {
+      name: 'Markets',
+      boards: [
+        ['Bitcoin Discussion', 'คุยเรื่องบิตคอยน์ ราคา โปรโตคอล และข่าว'],
+        ['Altcoins', 'เหรียญและโทเคนอื่น ๆ'],
+        ['เทรดและสัญญาณ', 'สัญญาณ มุมมอง และวิธีเทรด'],
+        ['ETF & Macro', 'เงินไหลเข้ากอง ETF และภาพใหญ่ของตลาด'],
+      ],
+    },
+    {
+      name: 'Community',
+      boards: [['คุยเล่น (Off-topic)', 'คุยเรื่องอื่นนอกตลาด']],
+    },
+  ] as const
+  db.exec('BEGIN')
+  try {
+    let categoryPosition = 1
+    let welcomeBoard = 0
+    for (const category of categories) {
+      const categoryId = Number(
+        db.prepare('INSERT INTO forum_categories (name, position) VALUES (?, ?)').run(category.name, categoryPosition).lastInsertRowid,
+      )
+      categoryPosition += 1
+      category.boards.forEach((board, index) => {
+        const boardId = Number(
+          db.prepare('INSERT INTO forum_boards (category_id, name, description, position) VALUES (?, ?, ?, ?)').run(
+            categoryId,
+            board[0],
+            board[1],
+            index + 1,
+          ).lastInsertRowid,
+        )
+        if (!welcomeBoard) welcomeBoard = boardId
+      })
+    }
+    const owner = findAccountByKey(nicknameKey(siteOwnerUsername()))
+    const now = Date.now()
+    const name = owner?.nickname ?? 'FIBO99'
+    const accountId = owner?.id ?? null
+    const topicId = Number(
+      db.prepare(
+        `INSERT INTO forum_topics (
+          board_id, subject, author_account_id, author_name, author_rank, sticky, locked, views, reply_count, created_at, last_post_at, last_poster_name
+        ) VALUES (?, ?, ?, ?, 'owner', 1, 0, 0, 0, ?, ?, ?)`,
+      ).run(welcomeBoard, 'Welcome to FIBO99 Forum', accountId, name, now, now, name).lastInsertRowid,
+    )
+    const body = [
+      'ยินดีต้อนรับสู่ FIBO99 Forum',
+      '',
+      'กระดานนี้เป็นที่ถาม-ตอบแบบกระทู้ ห้องเสียง ไมค์ แชร์จอ และดีเจอยู่ที่ Live Room',
+      '',
+      '[quote author=Satoshi Nakamoto date=January 03, 2009]',
+      'The Times 03/Jan/2009 Chancellor on brink of second bailout for banks',
+      '[/quote]',
+      '',
+      'กด New Topic ในบอร์ดที่ต้องการ แล้วตอบในกระทู้ได้เลย',
+    ].join('\n')
+    db.prepare(
+      `INSERT INTO forum_posts (topic_id, author_account_id, author_name, author_rank, body, created_at, updated_at)
+       VALUES (?, ?, ?, 'owner', ?, ?, NULL)`,
+    ).run(topicId, accountId, name, body, now)
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
+function setting(key: string) {
+  const row = sqlite().prepare('SELECT value FROM forum_settings WHERE key = ?').get(key) as { value: string } | undefined
+  return row?.value ?? null
+}
+
+function guestPosting() {
+  return setting('guest_posting') === '1'
+}
+
+type Actor = {
+  accountId: string | null
+  name: string
+  rank: RankId
+  color: string
+  canModerate: boolean
+  textMuted: boolean
+  banned: boolean
+}
+
+function actorFor(req: Request): Actor {
+  const header = req.header('authorization') ?? ''
+  const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : ''
+  const account = accountFromToken(token)
+  const base = identity(account?.id ?? null, account?.nickname ?? 'Guest')
+  const banned = account ? isAccountBanned(FORUM_ROOM, account.id) : false
+  const member = account ? getMember(FORUM_ROOM, account.id) : undefined
+  return {
+    accountId: account?.id ?? null,
+    name: base.name,
+    rank: base.rank,
+    color: base.color,
+    canModerate: rankLevel(base.rank) >= rankLevel('moderator'),
+    textMuted: Boolean(member && member.text_muted === 1 && base.rank !== 'owner'),
+    banned,
+  }
+}
+
+function identity(accountId: string | null, fallbackName: string) {
+  const colors = getRankColors(FORUM_ROOM)
+  if (!accountId) {
+    return {
+      accountId: null,
+      name: fallbackName,
+      rank: 'guest' as RankId,
+      color: colors.guest,
+    }
+  }
+  const account = findAccountById(accountId)
+  const member = getMember(FORUM_ROOM, accountId)
+  let rank: RankId = 'member'
+  if (account && nicknameKey(account.nickname) === nicknameKey(siteOwnerUsername()) && findAccountByKey(nicknameKey(siteOwnerUsername()))?.id === accountId) {
+    rank = 'owner'
+  }
+  if (member && isRankId(member.rank) && rank !== 'owner') rank = member.rank
+  if (member?.rank === 'owner') rank = 'owner'
+  const ownerAccount = findAccountByKey(nicknameKey(siteOwnerUsername()))
+  if (ownerAccount && ownerAccount.id === accountId) rank = 'owner'
+  return {
+    accountId,
+    name: account?.nickname ?? fallbackName,
+    rank,
+    color: member?.name_color || colors[rank],
+  }
+}
+
+function meFor(req: Request): ForumMe {
+  const actor = actorFor(req)
+  const posts = actor.accountId ? postCount(actor.accountId) : 0
+  const block = postBlock(actor)
+  return {
+    accountId: actor.accountId,
+    name: actor.accountId ? actor.name : 'Guest',
+    rank: actor.rank,
+    rankLabel: rankLabel(actor.rank),
+    color: actor.color,
+    avatarUrl: avatarUrl(actor.accountId),
+    posts,
+    signature: signatureOf(actor.accountId),
+    canPost: !block,
+    canModerate: actor.canModerate,
+    guestPosting: guestPosting(),
+    textMuted: actor.textMuted,
+    postBlock: block?.message ?? null,
+  }
+}
+
+function postBlock(actor: Actor) {
+  if (actor.banned) return { status: 403, message: 'คุณถูกแบนจากห้องหลัก' }
+  if (actor.textMuted) return { status: 403, message: 'คุณถูกปิดแชต' }
+  if (!actor.accountId && !guestPosting()) return { status: 401, message: 'เข้าสู่ระบบก่อนโพสต์' }
+  return null
+}
+
+function authorFrom(actor: Actor, guestName: unknown): { accountId: string | null; name: string; rank: RankId } | { error: string } {
+  if (actor.accountId) return { accountId: actor.accountId, name: actor.name, rank: actor.rank }
+  const name = cleanPlain(guestName, 2, 24)
+  if (!name) return { error: 'ตั้งชื่อผู้มาเยือน 2–24 ตัวอักษร' }
+  if (findAccountByKey(nicknameKey(name.replace(/\s+/g, ''))) || findAccountByKey(nicknameKey(name))) {
+    return { error: 'ชื่อนี้เป็นบัญชีสมาชิก ให้เข้าสู่ระบบก่อน' }
+  }
+  return { accountId: null, name, rank: 'guest' }
+}
+
+function tooFast(actor: Actor) {
+  const key = actor.accountId ?? 'guest'
+  const now = Date.now()
+  const previous = lastPostAt.get(key) ?? 0
+  if (now - previous < 500) return true
+  lastPostAt.set(key, now)
+  return false
+}
+
+function listCategories() {
+  const categories = sqlite().prepare('SELECT id, name, position FROM forum_categories ORDER BY position ASC, id ASC').all() as {
+    id: number
+    name: string
+    position: number
+  }[]
+  return categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    position: category.position,
+    boards: boardsIn(category.id),
+  }))
+}
+
+function boardsIn(categoryId: number) {
+  const boards = sqlite()
+    .prepare('SELECT id, category_id, name, description, position FROM forum_boards WHERE category_id = ? ORDER BY position ASC, id ASC')
+    .all(categoryId) as { id: number; category_id: number; name: string; description: string; position: number }[]
+  return boards.map((board) => boardSummary(board))
+}
+
+function boardSummary(board: { id: number; category_id: number; name: string; description: string; position: number }) {
+  const counts = sqlite()
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM forum_topics WHERE board_id = ?) AS topics,
+         (SELECT COUNT(*) FROM forum_posts p JOIN forum_topics t ON t.id = p.topic_id WHERE t.board_id = ?) AS posts`,
+    )
+    .get(board.id, board.id) as { topics: number; posts: number }
+  const last = sqlite()
+    .prepare(
+      `SELECT id, subject, last_poster_name, last_post_at, reply_count
+       FROM forum_topics WHERE board_id = ? ORDER BY last_post_at DESC LIMIT 1`,
+    )
+    .get(board.id) as { id: number; subject: string; last_poster_name: string; last_post_at: number; reply_count: number } | undefined
+  return {
+    id: board.id,
+    categoryId: board.category_id,
+    name: board.name,
+    description: board.description,
+    position: board.position,
+    topics: counts.topics,
+    posts: counts.posts,
+    lastPost: last
+      ? {
+          topicId: last.id,
+          subject: last.subject,
+          name: last.last_poster_name,
+          at: last.last_post_at,
+          page: Math.max(1, Math.ceil((last.reply_count + 1) / POST_PAGE)),
+        }
+      : null,
+  }
+}
+
+function getBoard(id: number) {
+  const row = sqlite()
+    .prepare('SELECT id, category_id, name, description, position FROM forum_boards WHERE id = ?')
+    .get(id) as { id: number; category_id: number; name: string; description: string; position: number } | undefined
+  return row ? boardSummary(row) : undefined
+}
+
+function getCategory(id: number) {
+  const row = sqlite().prepare('SELECT id, name, position FROM forum_categories WHERE id = ?').get(id) as
+    | { id: number; name: string; position: number }
+    | undefined
+  return row ? { id: row.id, name: row.name, position: row.position } : null
+}
+
+function boardChoices() {
+  return sqlite()
+    .prepare(
+      `SELECT b.id, b.name, c.name AS category
+       FROM forum_boards b JOIN forum_categories c ON c.id = b.category_id
+       ORDER BY c.position ASC, b.position ASC`,
+    )
+    .all() as { id: number; name: string; category: string }[]
+}
+
+function listTopics(boardId: number, sticky: boolean, offset: number, limit: number) {
+  const rows = sqlite()
+    .prepare(
+      `SELECT * FROM forum_topics
+       WHERE board_id = ? AND sticky = ?
+       ORDER BY last_post_at DESC, id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(boardId, sticky ? 1 : 0, limit, offset) as TopicRow[]
+  return rows.map(publicTopic)
+}
+
+function countTopics(boardId: number, sticky: boolean) {
+  const row = sqlite()
+    .prepare('SELECT COUNT(*) AS n FROM forum_topics WHERE board_id = ? AND sticky = ?')
+    .get(boardId, sticky ? 1 : 0) as { n: number }
+  return row.n
+}
+
+function getTopic(id: number) {
+  const row = sqlite().prepare('SELECT * FROM forum_topics WHERE id = ?').get(id) as TopicRow | undefined
+  return row ? publicTopic(row) : undefined
+}
+
+function publicTopic(row: TopicRow) {
+  const rank = isRankId(row.author_rank) ? row.author_rank : 'member'
+  return {
+    id: row.id,
+    boardId: row.board_id,
+    subject: row.subject,
+    authorName: row.author_name,
+    authorRank: rank,
+    sticky: row.sticky === 1,
+    locked: row.locked === 1,
+    views: row.views,
+    replies: row.reply_count,
+    createdAt: row.created_at,
+    lastPostAt: row.last_post_at,
+    lastPosterName: row.last_poster_name,
+  }
+}
+
+function listPosts(topicId: number, offset: number, limit: number) {
+  const rows = sqlite()
+    .prepare('SELECT * FROM forum_posts WHERE topic_id = ? ORDER BY id ASC LIMIT ? OFFSET ?')
+    .all(topicId, limit, offset) as PostRow[]
+  return rows.map(publicPost)
+}
+
+function getPost(id: number) {
+  return sqlite().prepare('SELECT * FROM forum_posts WHERE id = ?').get(id) as PostRow | undefined
+}
+
+function publicPost(row: PostRow): ForumPost {
+  const profile = identity(row.author_account_id, row.author_name)
+  const rank = row.author_account_id ? profile.rank : isRankId(row.author_rank) ? row.author_rank : 'guest'
+  const colors = getRankColors(FORUM_ROOM)
+  return {
+    id: row.id,
+    topicId: row.topic_id,
+    body: row.body,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    author: {
+      accountId: row.author_account_id,
+      name: row.author_account_id ? profile.name : row.author_name,
+      rank,
+      rankLabel: rankLabel(rank),
+      color: row.author_account_id ? profile.color : colors[rank],
+      avatarUrl: avatarUrl(row.author_account_id),
+      posts: row.author_account_id ? postCount(row.author_account_id) : 0,
+      signature: signatureOf(row.author_account_id),
+    },
+  }
+}
+
+function countPosts(topicId: number) {
+  const row = sqlite().prepare('SELECT COUNT(*) AS n FROM forum_posts WHERE topic_id = ?').get(topicId) as { n: number }
+  return row.n
+}
+
+function firstPostId(topicId: number) {
+  const row = sqlite().prepare('SELECT id FROM forum_posts WHERE topic_id = ? ORDER BY id ASC LIMIT 1').get(topicId) as
+    | { id: number }
+    | undefined
+  return row?.id ?? 0
+}
+
+function refreshTopic(topicId: number) {
+  const count = countPosts(topicId)
+  const last = sqlite()
+    .prepare('SELECT author_name, created_at FROM forum_posts WHERE topic_id = ? ORDER BY id DESC LIMIT 1')
+    .get(topicId) as { author_name: string; created_at: number } | undefined
+  if (!last) return
+  sqlite()
+    .prepare('UPDATE forum_topics SET reply_count = ?, last_post_at = ?, last_poster_name = ? WHERE id = ?')
+    .run(Math.max(0, count - 1), last.created_at, last.author_name, topicId)
+}
+
+function deleteTopic(topicId: number) {
+  const db = sqlite()
+  db.prepare('DELETE FROM forum_posts WHERE topic_id = ?').run(topicId)
+  db.prepare('DELETE FROM forum_topics WHERE id = ?').run(topicId)
+}
+
+function postCount(accountId: string) {
+  const row = sqlite().prepare('SELECT COUNT(*) AS n FROM forum_posts WHERE author_account_id = ?').get(accountId) as {
+    n: number
+  }
+  return row.n
+}
+
+function signatureOf(accountId: string | null) {
+  if (!accountId) return ''
+  const row = sqlite().prepare('SELECT signature FROM accounts WHERE id = ?').get(accountId) as
+    | { signature: string | null }
+    | undefined
+  return (row?.signature ?? '').slice(0, 300)
+}
+
+function forumStats() {
+  const posts = (sqlite().prepare('SELECT COUNT(*) AS n FROM forum_posts').get() as { n: number }).n
+  const topics = (sqlite().prepare('SELECT COUNT(*) AS n FROM forum_topics').get() as { n: number }).n
+  const members = (sqlite().prepare('SELECT COUNT(*) AS n FROM accounts').get() as { n: number }).n
+  const latest = sqlite().prepare('SELECT nickname FROM accounts ORDER BY created_at DESC, rowid DESC LIMIT 1').get() as
+    | { nickname: string }
+    | undefined
+  return { posts, topics, members, latestMember: latest?.nickname ?? null }
+}
+
+function avatarUrl(accountId: string | null) {
+  if (!accountId || !/^[A-Za-z0-9_-]{8,64}$/.test(accountId)) return null
+  const file = path.join(dataDir(), 'avatars', `${accountId}.webp`)
+  if (!existsSync(file)) return null
+  return `/api/avatars/${accountId}?v=${Math.floor(statSync(file).mtimeMs)}`
+}
+
+function nextPosition(table: 'forum_categories' | 'forum_boards', categoryId?: number) {
+  const row = categoryId
+    ? (sqlite().prepare(`SELECT COALESCE(MAX(position), 0) AS n FROM ${table} WHERE category_id = ?`).get(categoryId) as {
+        n: number
+      })
+    : (sqlite().prepare(`SELECT COALESCE(MAX(position), 0) AS n FROM ${table}`).get() as { n: number })
+  return row.n + 1
+}
+
+function moveRow(table: 'forum_categories' | 'forum_boards', id: number, direction: 'up' | 'down', categoryId?: number) {
+  const rows = (
+    categoryId
+      ? sqlite().prepare(`SELECT id FROM ${table} WHERE category_id = ? ORDER BY position ASC, id ASC`).all(categoryId)
+      : sqlite().prepare(`SELECT id FROM ${table} ORDER BY position ASC, id ASC`).all()
+  ) as { id: number }[]
+  const index = rows.findIndex((row) => row.id === id)
+  const swap = direction === 'up' ? index - 1 : index + 1
+  if (index < 0 || swap < 0 || swap >= rows.length) return
+  const reordered = rows.slice()
+  const current = reordered[index]
+  reordered[index] = reordered[swap]!
+  reordered[swap] = current!
+  const update = sqlite().prepare(`UPDATE ${table} SET position = ? WHERE id = ?`)
+  reordered.forEach((row, position) => update.run(position + 1, row.id))
+}
+
+function snippet(body: string, query: string) {
+  const flat = body.replace(/\s+/g, ' ').trim()
+  const at = flat.toLowerCase().indexOf(query.toLowerCase())
+  const start = Math.max(0, at < 0 ? 0 : at - 40)
+  const slice = flat.slice(start, start + 140)
+  return `${start > 0 ? '…' : ''}${slice}${start + 140 < flat.length ? '…' : ''}`
+}
+
+function pageParam(value: unknown) {
+  const page = Number(value)
+  if (!Number.isInteger(page) || page < 1 || page > 5000) return 1
+  return page
+}
+
+function intId(value: unknown) {
+  const id = Number(value)
+  if (!Number.isInteger(id) || id < 1) return 0
+  return id
+}
+
+function cleanPlain(input: unknown, min: number, max: number) {
+  if (typeof input !== 'string') return null
+  const text = stripControls(input).replace(/\s+/g, ' ').trim()
+  const chars = [...text]
+  if (chars.length < min || chars.length > max) return min === 0 && chars.length === 0 ? '' : null
+  return chars.join('')
+}
+
+function cleanBody(input: unknown) {
+  if (typeof input !== 'string') return null
+  if (input.trim() === '') return ''
+  let out = ''
+  for (const char of input.replace(/\r\n/g, '\n').replace(/\r/g, '\n')) {
+    const code = char.codePointAt(0) ?? 0
+    if (code === 0x0a || code === 0x09) {
+      out += char
+      continue
+    }
+    if (code <= 0x1f || code === 0x7f) continue
+    out += char
+  }
+  const trimmed = out.trim()
+  const chars = [...trimmed]
+  if (chars.length < 1 || chars.length > 8000) return null
+  return chars.join('')
+}
+
+function stripControls(input: string) {
+  let out = ''
+  for (const char of input) {
+    const code = char.codePointAt(0) ?? 0
+    if (code <= 0x1f || code === 0x7f) continue
+    out += char
+  }
+  return out
+}
+
+function requestIp(req: Request) {
+  return (req.ip || req.socket.remoteAddress || 'unknown').replace(/^::ffff:/, '')
+}

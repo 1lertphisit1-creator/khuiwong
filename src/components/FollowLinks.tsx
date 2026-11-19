@@ -20,10 +20,11 @@ const LINKS = [
   },
 ] as const
 
-export function FollowLinks({ className = '' }: { className?: string }) {
+export function FollowLinks({ className = '', tone = 'dark' }: { className?: string; tone?: 'dark' | 'forum' }) {
+  const forum = tone === 'forum'
   return (
-    <section data-testid="follow-fibo" className={`border-t border-gold/30 bg-ink/50 px-3 py-3 ${className}`}>
-      <p className="font-display text-center text-sm font-bold tracking-wide text-gold">กดติดตาม FIBO99</p>
+    <section data-testid="follow-fibo" className={forum ? `border-t border-[#696969] bg-[#f4f4f6] px-3 py-2 text-black ${className}` : `border-t border-gold/30 bg-ink/50 px-3 py-3 ${className}`}>
+      <p className={forum ? 'text-center text-xs font-bold text-[#334466]' : 'font-display text-center text-sm font-bold tracking-wide text-gold'}>กดติดตาม FIBO99</p>
       <ul className="mt-2 flex flex-wrap items-center justify-center gap-2">
         {LINKS.map((link) => (
           <li key={link.name}>
@@ -32,11 +33,11 @@ export function FollowLinks({ className = '' }: { className?: string }) {
               target="_blank"
               rel="noopener noreferrer"
               aria-label={link.label}
-              className="inline-flex items-center gap-2 rounded-full border border-gold/40 bg-burgundy/50 px-3 py-1.5 text-xs text-cream transition hover:border-gold hover:bg-burgundy"
+              className={forum ? 'inline-flex min-h-11 items-center gap-2 border border-[#6b8abf] bg-white px-3 py-1.5 text-xs font-bold text-[#334466]' : 'inline-flex items-center gap-2 rounded-full border border-gold/40 bg-burgundy/50 px-3 py-1.5 text-xs text-cream transition hover:border-gold hover:bg-burgundy'}
             >
               <link.icon />
               <span>{link.name}</span>
-              {'hint' in link ? <span className="text-gold">{link.hint}</span> : null}
+              {'hint' in link ? <span className={forum ? 'font-normal text-[#333]' : 'text-gold'}>{link.hint}</span> : null}
             </a>
           </li>
         ))}

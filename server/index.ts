@@ -19,6 +19,7 @@ import {
   registerAccount,
 } from './auth.ts'
 import { EtfFeed, type EtfBoard } from './etf.ts'
+import { initForum, mountForum, presenceFromToken } from './forum.ts'
 import { NewsFeed, newsConfig } from './news.ts'
 import { PriceFeed, type PriceBoard } from './prices.ts'
 import { musicSettings, saveMusicUrl, type MusicSetting } from './music.ts'
@@ -200,6 +201,7 @@ type ClientToServer = {
   'dj-pause': () => void
   'dj-skip': (payload: { direction?: number }) => void
   'dj-remove': (payload: { trackId?: string }) => void
+  'forum-presence': (payload: { token?: string } | undefined) => void
 }
 
 type ServerToClient = {
@@ -255,6 +257,20 @@ type ServerToClient = {
   'room-error': (payload: { message: string }) => void
   'mod-error': (payload: { message: string }) => void
   kicked: (payload: { message: string }) => void
+  'forum-event': (payload: {
+    type: 'post' | 'topic' | 'boards'
+    topicId?: number
+    boardId?: number
+    fromBoardId?: number
+    deleted?: boolean
+    post?: unknown
+  }) => void
+  'forum-online': (payload: {
+    total: number
+    guests: number
+    members: number
+    users: { name: string; rank: string; color: string }[]
+  }) => void
 }
 
 type SocketData = {
@@ -387,6 +403,7 @@ loadEnvFile()
 
 const rooms = new Map<string, LiveRoom>()
 const lastChatAt = new Map<string, number>()
+const forumOnline = new Map<string, { accountId: string | null; name: string; rank: string; color: string }>()
 
 function ensureRoomRecord(roomId: string, ownerAccountId: string | null) {
   if (!getRoom(roomId)) {
@@ -699,10 +716,29 @@ function roomStatePayload(socket: AppSocket, roomId: string, live: LiveRoom, use
 
 const MAIN_ROOM_ID = 'MAIN'
 
+function emitForumOnline(io: AppServer) {
+  const values = [...forumOnline.values()]
+  const memberSessions = values.filter((user) => user.accountId)
+  const seen = new Set<string>()
+  const users: { name: string; rank: string; color: string }[] = []
+  for (const user of memberSessions) {
+    if (!user.accountId || seen.has(user.accountId)) continue
+    seen.add(user.accountId)
+    users.push({ name: user.name, rank: user.rank, color: user.color })
+  }
+  io.emit('forum-online', {
+    total: values.length,
+    guests: values.length - memberSessions.length,
+    members: memberSessions.length,
+    users,
+  })
+}
+
 async function main() {
   ensureSiteOwner()
   ensureRoomRecord(MAIN_ROOM_ID, null)
   grantSiteOwnerRoom(MAIN_ROOM_ID)
+  initForum()
   const app = express()
   const httpServer = createServer(app)
   const io: AppServer = new Server(httpServer, {
@@ -956,12 +992,22 @@ async function main() {
     receiveUpload(req, res, roomId, () => emitDj(io, roomId))
   })
 
+  mountForum(app, {
+    emit(event, payload) {
+      io.emit(event as 'forum-event', payload as never)
+    },
+  })
+
   io.on('connection', (socket) => {
     const board = prices.snapshot()
     if (board) socket.emit('prices', board)
     if (news.posts.length > 0) socket.emit('news-posts', news.posts)
     if (etf.board) socket.emit('etf-flows', etf.board)
     socket.emit('site-settings', musicSettings())
+    socket.on('forum-presence', (payload: { token?: string } | undefined) => {
+      forumOnline.set(socket.id, presenceFromToken(typeof payload?.token === 'string' ? payload.token : null))
+      emitForumOnline(io)
+    })
     socket.on('watch', (payload) => {
       if (socket.data.roomId) return
       const roomId = cleanRoomId(payload?.roomId) ?? MAIN_ROOM_ID
@@ -1718,7 +1764,9 @@ async function main() {
 
     socket.on('disconnect', () => {
       lastChatAt.delete(socket.id)
+      const wasOnline = forumOnline.delete(socket.id)
       removeFromRoom(io, socket)
+      if (wasOnline) emitForumOnline(io)
     })
   })
 

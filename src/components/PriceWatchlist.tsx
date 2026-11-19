@@ -19,7 +19,7 @@ type Board = {
   live: boolean
 }
 
-export function PriceWatchlist() {
+export function PriceWatchlist({ forum = false }: { forum?: boolean }) {
   const [board, setBoard] = useState<Board | null>(null)
   const [flash, setFlash] = useState<Partial<Record<Symbol, number>>>({})
   const [now, setNow] = useState(() => Date.now())
@@ -66,25 +66,29 @@ export function PriceWatchlist() {
     <section
       data-testid="price-watchlist"
       data-live={live ? 'true' : 'false'}
-      className="ornament-panel flex max-h-full min-h-0 flex-col overflow-hidden rounded-2xl lg:max-h-[22rem]"
+      className={
+        forum
+          ? 'flex min-h-0 flex-col overflow-hidden border border-[#696969] bg-white text-black'
+          : 'ornament-panel flex max-h-full min-h-0 flex-col overflow-hidden rounded-2xl lg:max-h-[22rem]'
+      }
     >
-      <header className="flex items-center gap-2 px-3 pt-3 pb-2">
-        <h2 className="font-display text-base font-bold text-gold">ราคา</h2>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${live ? 'bg-rose text-paper' : 'bg-ink text-gold'}`}>
+      <header className={forum ? 'flex items-center gap-2 bg-[#334466] px-2 py-1 text-white' : 'flex items-center gap-2 px-3 pt-3 pb-2'}>
+        <h2 className={forum ? 'text-xs font-bold' : 'font-display text-base font-bold text-gold'}>ราคา</h2>
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${live ? 'bg-rose text-paper' : forum ? 'bg-white text-[#334466]' : 'bg-ink text-gold'}`}>
           {!board ? 'รอ' : stale ? 'ข้อมูลช้า' : live ? 'LIVE' : 'REST'}
         </span>
-        <span className="ml-auto text-[10px] text-muted-foreground">{age == null ? '—' : `${Math.round(age / 1000)} วิ`}</span>
+        <span className={forum ? 'ml-auto text-[10px] text-white' : 'ml-auto text-[10px] text-muted-foreground'}>{age == null ? '—' : `${Math.round(age / 1000)} วิ`}</span>
       </header>
       <ul className="app-scrollbar min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
         {ORDER.map((symbol) => (
-          <Row key={symbol} symbol={symbol} quote={bySymbol.get(symbol) ?? null} flashKey={flash[symbol] ?? 0} />
+          <Row key={symbol} forum={forum} symbol={symbol} quote={bySymbol.get(symbol) ?? null} flashKey={flash[symbol] ?? 0} />
         ))}
       </ul>
     </section>
   )
 }
 
-function Row({ symbol, quote, flashKey }: { symbol: Symbol; quote: Quote | null; flashKey: number }) {
+function Row({ symbol, quote, flashKey, forum }: { symbol: Symbol; quote: Quote | null; flashKey: number; forum: boolean }) {
   const up = (quote?.changePct ?? 0) >= 0
   return (
     <li
@@ -93,12 +97,12 @@ function Row({ symbol, quote, flashKey }: { symbol: Symbol; quote: Quote | null;
       className={`grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-xl px-2 py-1 ${flashKey ? 'price-flash' : ''}`}
     >
       <span className="flex items-center gap-1.5">
-        <span className="grid h-6 w-6 place-items-center rounded-full border border-gold/40 bg-ink text-[9px] font-bold text-gold">
+        <span className={forum ? 'grid h-6 w-6 place-items-center border border-[#334466] bg-[#6b8abf] text-[9px] font-bold text-white' : 'grid h-6 w-6 place-items-center rounded-full border border-gold/40 bg-ink text-[9px] font-bold text-gold'}>
           {symbol.slice(0, 1)}
         </span>
         <span className="leading-tight">
-          <span className="block font-display text-xs font-bold text-cream">{symbol}</span>
-          {symbol === 'XAU' ? <span className="block text-[9px] text-muted-foreground">ทองคำ</span> : null}
+          <span className={forum ? 'block text-xs font-bold text-[#334466]' : 'block font-display text-xs font-bold text-cream'}>{symbol}</span>
+          {symbol === 'XAU' ? <span className={forum ? 'block text-[9px] text-[#555]' : 'block text-[9px] text-muted-foreground'}>ทองคำ</span> : null}
         </span>
       </span>
       <span className="text-right text-sm tabular-nums">{quote ? money(symbol, quote.usd) : '—'}</span>

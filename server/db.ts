@@ -77,6 +77,10 @@ const resolvedDataDir = dataDir()
 mkdirSync(resolvedDataDir, { recursive: true })
 
 const db = new DatabaseSync(path.join(resolvedDataDir, 'khuiwong.sqlite'))
+
+export function sqlite() {
+  return db
+}
 db.exec('PRAGMA journal_mode = WAL')
 db.exec('PRAGMA foreign_keys = ON')
 db.exec(`

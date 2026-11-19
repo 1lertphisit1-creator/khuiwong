@@ -6,7 +6,7 @@ const ARTIFACTS = '/opt/cursor/artifacts'
 async function signIn(page: Page, name: string) {
   await page.goto('/')
   const account = page.getByLabel('ชื่อบัญชี')
-  if (!(await account.isVisible())) await page.getByRole('button', { name: 'แบรนด์' }).click()
+  if (!(await account.isVisible())) await page.getByTestId('nav-login').click()
   await account.fill(name)
   await page.getByLabel('รหัสผ่าน').fill('password123')
   await page.getByTestId('register').click()
