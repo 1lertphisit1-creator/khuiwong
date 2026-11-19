@@ -253,16 +253,6 @@ export function findAccountById(id: string) {
   return db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as AccountRow | undefined
 }
 
-export function deleteAccountByNicknameKey(nicknameKey: string) {
-  const account = findAccountByKey(nicknameKey)
-  if (!account) return false
-  db.prepare('DELETE FROM sessions WHERE account_id = ?').run(account.id)
-  db.prepare('DELETE FROM avatars WHERE account_id = ?').run(account.id)
-  db.prepare('DELETE FROM room_members WHERE account_id = ?').run(account.id)
-  db.prepare('DELETE FROM accounts WHERE id = ?').run(account.id)
-  return true
-}
-
 export function insertSession(tokenHash: string, accountId: string, expiresAt: number) {
   db.prepare('INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)').run(
     tokenHash,
