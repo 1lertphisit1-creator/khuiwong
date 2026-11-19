@@ -14,6 +14,7 @@ import {
   updateAccountNameColor,
   usingPostgres,
 } from './db.ts'
+import { forumOnlineSnapshot } from './presence.ts'
 import { isRankId, rankLabel, rankLevel, type RankId } from './ranks.ts'
 
 const FORUM_ROOM = 'MAIN'
@@ -189,7 +190,7 @@ export function mountForum(app: Express, io: Hub) {
   })
 
   app.get('/api/forum/bootstrap', (req, res) => {
-    res.json({ me: meFor(req), stats: forumStats(), branding: forumBranding() })
+    res.json({ me: meFor(req), stats: forumStats(), branding: forumBranding(), online: forumOnlineSnapshot() })
   })
 
   app.post('/api/forum/views', (req, res) => {

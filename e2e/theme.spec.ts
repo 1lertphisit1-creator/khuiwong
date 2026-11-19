@@ -21,7 +21,7 @@ test('plain forum on desktop and mobile', async ({ browser }) => {
   await page.screenshot({ path: `${ARTIFACTS}/screenshot_forum_plain_desktop.png`, fullPage: true })
 
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(page.locator('.smf-tabbar')).toBeVisible()
+  await expect(page.locator('.smf-tabbar')).toHaveCount(0)
   await page.screenshot({ path: `${ARTIFACTS}/screenshot_forum_plain_mobile.png`, fullPage: true })
 
   await page.setViewportSize({ width: 1360, height: 860 })

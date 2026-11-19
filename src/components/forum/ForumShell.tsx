@@ -32,14 +32,17 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
     return () => window.clearInterval(timer)
   }, [])
 
+  const routeKey = `${route.name}:${'id' in route ? route.id : ''}`
+
   useEffect(() => {
     let stopped = false
     const load = () => {
-      void forumGet<{ me: ForumMe; stats: ForumStats; branding: ForumBranding }>('/api/forum/bootstrap')
+      void forumGet<{ me: ForumMe; stats: ForumStats; branding: ForumBranding; online: ForumOnline }>('/api/forum/bootstrap')
         .then((payload) => {
           if (stopped) return
           setMe(payload.me)
           setStats(payload.stats)
+          if (payload.online) setOnline(payload.online)
           if (payload.branding?.siteName && payload.branding.forumName) setBranding(payload.branding)
         })
         .catch(() => {})
@@ -59,7 +62,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
       stop()
       window.removeEventListener('khuiwong-auth', onAuth)
     }
-  }, [])
+  }, [routeKey])
 
   async function logout() {
     await api('/api/logout', { method: 'POST' }).catch(() => {})
@@ -136,11 +139,11 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
         <div className="smf-layout">{children}</div>
 
         <footer className="smf-footer" data-testid="forum-footer">
-            <p>
+            <p data-testid="forum-stats">
               {stats ? `${stats.posts} Posts in ${stats.topics} Topics by ${stats.members} Members.` : '…'} Latest Member:{' '}
-              {stats?.latestMember ? <MemberName name={stats.latestMember.name} color={stats.latestMember.color} /> : '—'}
+              <span data-testid="latest-member">{stats?.latestMember ? <MemberName name={stats.latestMember.name} color={stats.latestMember.color} /> : '—'}</span>
             </p>
-            <p>
+            <p data-testid="forum-online">
               Users Online:{' '}
               {online ? `${online.total} (${online.guests} Guests, ${online.members} Members)` : '…'}
               {online && online.users.length > 0 ? ': ' : ''}
@@ -159,26 +162,6 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
         </footer>
         <AdSlots />
         <PriceWatchlist />
-
-        <nav className="smf-tabbar lg:hidden" aria-label="Mobile">
-          <button type="button" aria-current={homeCurrent ? 'page' : undefined} onClick={() => go('/')}>
-            Home
-          </button>
-          {me?.accountId ? (
-            <button type="button" aria-current={route.name === 'profile' ? 'page' : undefined} onClick={() => go('/profile')}>
-              Profile
-            </button>
-          ) : (
-            <button type="button" aria-current={route.name === 'login' ? 'page' : undefined} onClick={() => go('/login')}>
-              Login
-            </button>
-          )}
-          {me?.canModerate ? (
-            <button type="button" aria-current={route.name === 'admin' ? 'page' : undefined} onClick={() => go('/admin')}>
-              Admin
-            </button>
-          ) : null}
-        </nav>
       </div>
     </BrandingProvider>
   )

@@ -20,6 +20,7 @@ import {
 } from './auth.ts'
 import { compressAvatar } from './avatar.ts'
 import { initForum, mountForum, pageShare, presenceFromToken } from './forum.ts'
+import { clearForumPresence, forumOnlineSnapshot, setForumPresence } from './presence.ts'
 import { canonicalUrl, injectShareMeta, isSharePath } from './shareHtml.ts'
 import { NewsFeed, newsConfig } from './news.ts'
 import { PriceFeed, type PriceBoard } from './prices.ts'
@@ -405,7 +406,6 @@ loadEnvFile()
 
 const rooms = new Map<string, LiveRoom>()
 const lastChatAt = new Map<string, number>()
-const forumOnline = new Map<string, { accountId: string | null; name: string; rank: string; color: string }>()
 
 function ensureRoomRecord(roomId: string, ownerAccountId: string | null) {
   if (!getRoom(roomId)) {
@@ -713,21 +713,7 @@ function roomStatePayload(socket: AppSocket, roomId: string, live: LiveRoom, use
 const MAIN_ROOM_ID = 'MAIN'
 
 function emitForumOnline(io: AppServer) {
-  const values = [...forumOnline.values()]
-  const memberSessions = values.filter((user) => user.accountId)
-  const seen = new Set<string>()
-  const users: { name: string; rank: string; color: string }[] = []
-  for (const user of memberSessions) {
-    if (!user.accountId || seen.has(user.accountId)) continue
-    seen.add(user.accountId)
-    users.push({ name: user.name, rank: user.rank, color: user.color })
-  }
-  io.emit('forum-online', {
-    total: values.length,
-    guests: values.length - memberSessions.length,
-    members: memberSessions.length,
-    users,
-  })
+  io.emit('forum-online', forumOnlineSnapshot())
 }
 
 async function main() {
@@ -974,7 +960,7 @@ async function main() {
     if (board) socket.emit('prices', board)
     if (news.posts.length > 0) socket.emit('news-posts', news.posts)
     socket.on('forum-presence', (payload: { token?: string } | undefined) => {
-      forumOnline.set(socket.id, presenceFromToken(typeof payload?.token === 'string' ? payload.token : null))
+      setForumPresence(socket.id, presenceFromToken(typeof payload?.token === 'string' ? payload.token : null))
       emitForumOnline(io)
     })
     socket.on('watch', (payload) => {
@@ -1734,7 +1720,7 @@ async function main() {
 
     socket.on('disconnect', () => {
       lastChatAt.delete(socket.id)
-      const wasOnline = forumOnline.delete(socket.id)
+      const wasOnline = clearForumPresence(socket.id)
       removeFromRoom(io, socket)
       if (wasOnline) emitForumOnline(io)
     })
