@@ -247,9 +247,9 @@ body:has(.smf-doc) [data-testid='bgm-player'] {
 }
 
 .smf-layout {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: block;
+  max-width: 980px;
+  margin: 0 auto;
   padding: 8px;
 }
 
@@ -727,8 +727,7 @@ body:has(.smf-doc) [data-testid='bgm-player'] {
   bottom: 0;
   left: 0;
   z-index: 40;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  display: flex;
   border-top: 1px solid #1c2840;
   background: #334466;
   padding-bottom: env(safe-area-inset-bottom);
@@ -767,11 +766,8 @@ body:has(.smf-doc) [data-testid='bgm-player'] {
   }
 
   .smf-layout {
-    display: grid;
-    grid-template-columns: 16.5rem minmax(0, 1fr) 20rem;
-    align-items: start;
-    max-width: 1400px;
-    margin: 0 auto;
+    display: block;
+    max-width: 980px;
   }
 
   .smf-header,

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,7 +32,9 @@ import {
   findAccountByKey,
   getDjTrack,
   getMember,
+  avatarStamp,
   dataDir,
+  deleteAvatar,
   getPlayback,
   getRankColors,
   getRoom,
@@ -49,7 +51,10 @@ import {
   updateMemberColor,
   updateMemberFlags,
   updateMemberRank,
+  readAvatar,
   upsertMember,
+  usingPostgres,
+  writeAvatar,
   type DjPlaybackRow,
 } from './db.ts'
 import {
@@ -457,9 +462,7 @@ function avatarUrlFor(accountId: string | null) {
   if (!accountId || !/^[A-Za-z0-9_-]{8,64}$/.test(accountId)) return null
   let version = avatarVersions.get(accountId)
   if (version === undefined) {
-    const file = avatarFile(accountId)
-    if (!existsSync(file)) version = 0
-    else version = Math.floor(statSync(file).mtimeMs)
+    version = avatarStamp(accountId)
     avatarVersions.set(accountId, version)
   }
   if (!version) return null
@@ -898,14 +901,14 @@ async function main() {
       res.status(404).end()
       return
     }
-    const file = avatarFile(accountId)
-    if (!existsSync(file)) {
+    const avatar = readAvatar(accountId)
+    if (!avatar) {
       res.status(404).end()
       return
     }
     res.setHeader('Content-Type', 'image/webp')
     res.setHeader('Cache-Control', 'public, max-age=86400')
-    createReadStream(file).pipe(res)
+    res.send(avatar.bytes)
   })
 
   app.post(
@@ -922,7 +925,7 @@ async function main() {
         res.status(400).json({ message: 'ส่งรูปเป็น webp สี่เหลี่ยม ไม่เกิน 400 KB' })
         return
       }
-      writeFileSync(avatarFile(account.id), body)
+      writeAvatar(account.id, body)
       avatarVersions.set(account.id, Date.now())
       res.json({ avatarUrl: avatarUrlFor(account.id) })
     },
@@ -1389,8 +1392,9 @@ async function main() {
         socket.emit('mod-error', { message: 'ลบรูปคนนี้ไม่ได้' })
         return
       }
-      const file = avatarFile(target.accountId)
-      if (existsSync(file)) unlinkSync(file)
+      deleteAvatar(target.accountId)
+      const legacy = avatarFile(target.accountId)
+      if (existsSync(legacy)) unlinkSync(legacy)
       avatarVersions.set(target.accountId, 0)
       broadcastUser(io, context.roomId, context.live, target)
       pushMessage(
@@ -1831,6 +1835,7 @@ async function main() {
   httpServer.listen(PORT, '0.0.0.0', () => {
     const turn = process.env.TURN_URLS || process.env.TURN_URL
     console.log(`คุยวง ready at http://127.0.0.1:${PORT}`)
+    console.log(usingPostgres() ? 'Database: PostgreSQL' : 'Database: SQLite')
     console.log(turn ? 'TURN configured' : 'TURN not set — using public STUN only')
     console.log(process.env.OWNER_SECRET ? 'OWNER_SECRET configured' : 'OWNER_SECRET not set')
   })

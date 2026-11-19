@@ -37,7 +37,7 @@ export default function App() {
   return (
     <>
       <ForumShell route={route}>{route.name === 'live' ? <MainHall /> : <ForumPages route={route} />}</ForumShell>
-      <BackgroundMusic />
+      {route.name === 'live' ? <BackgroundMusic /> : null}
     </>
   )
 }

@@ -1,15 +1,14 @@
-import { existsSync, statSync } from 'node:fs'
-import path from 'node:path'
 import type { Express, Request, Response } from 'express'
 import { accountFromToken, nicknameKey, siteOwnerUsername } from './auth.ts'
 import {
-  dataDir,
+  avatarStamp,
   findAccountById,
   findAccountByKey,
   getMember,
   getRankColors,
   isAccountBanned,
   sqlite,
+  usingPostgres,
 } from './db.ts'
 import { isRankId, rankLabel, rankLevel, type RankId } from './ranks.ts'
 
@@ -88,6 +87,16 @@ type PostRow = {
 }
 
 export function initForum() {
+  if (!usingPostgres()) initSqliteForum()
+  const categories = sqlite().prepare('SELECT COUNT(*) AS n FROM forum_categories').get() as { n: number }
+  if (categories.n === 0) seedForum()
+  ensureSetting('guest_posting', '0')
+  ensureSetting('site_name', DEFAULT_SITE_NAME)
+  ensureSetting('forum_name', DEFAULT_FORUM_NAME)
+  removeEtfBoard()
+}
+
+function initSqliteForum() {
   const db = sqlite()
   db.exec(`
     CREATE TABLE IF NOT EXISTS forum_categories (
@@ -678,7 +687,6 @@ function seedForum() {
         ['Bitcoin Discussion', 'คุยเรื่องบิตคอยน์ ราคา โปรโตคอล และข่าว'],
         ['Altcoins', 'เหรียญและโทเคนอื่น ๆ'],
         ['เทรดและสัญญาณ', 'สัญญาณ มุมมอง และวิธีเทรด'],
-        ['ETF & Macro', 'เงินไหลเข้ากอง ETF และภาพใหญ่ของตลาด'],
       ],
     },
     {
@@ -1171,7 +1179,7 @@ function forumStats() {
   const posts = (sqlite().prepare('SELECT COUNT(*) AS n FROM forum_posts').get() as { n: number }).n
   const topics = (sqlite().prepare('SELECT COUNT(*) AS n FROM forum_topics').get() as { n: number }).n
   const members = (sqlite().prepare('SELECT COUNT(*) AS n FROM accounts').get() as { n: number }).n
-  const latest = sqlite().prepare('SELECT nickname FROM accounts ORDER BY created_at DESC, rowid DESC LIMIT 1').get() as
+  const latest = sqlite().prepare('SELECT nickname FROM accounts ORDER BY created_at DESC LIMIT 1').get() as
     | { nickname: string }
     | undefined
   return { posts, topics, members, latestMember: latest?.nickname ?? null }
@@ -1179,9 +1187,17 @@ function forumStats() {
 
 function avatarUrl(accountId: string | null) {
   if (!accountId || !/^[A-Za-z0-9_-]{8,64}$/.test(accountId)) return null
-  const file = path.join(dataDir(), 'avatars', `${accountId}.webp`)
-  if (!existsSync(file)) return null
-  return `/api/avatars/${accountId}?v=${Math.floor(statSync(file).mtimeMs)}`
+  const stamp = avatarStamp(accountId)
+  if (!stamp) return null
+  return `/api/avatars/${accountId}?v=${stamp}`
+}
+
+function removeEtfBoard() {
+  const board = sqlite().prepare('SELECT id FROM forum_boards WHERE name = ?').get('ETF & Macro') as { id: number } | undefined
+  if (!board) return
+  sqlite().prepare('DELETE FROM forum_posts WHERE topic_id IN (SELECT id FROM forum_topics WHERE board_id = ?)').run(board.id)
+  sqlite().prepare('DELETE FROM forum_topics WHERE board_id = ?').run(board.id)
+  sqlite().prepare('DELETE FROM forum_boards WHERE id = ?').run(board.id)
 }
 
 function nextPosition(table: 'forum_categories' | 'forum_boards', categoryId?: number) {

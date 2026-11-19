@@ -3,28 +3,28 @@ import { mkdir } from 'node:fs/promises'
 
 const ARTIFACTS = '/opt/cursor/artifacts'
 
-test('theme lobby and room on desktop and mobile', async ({ browser }) => {
+test('plain forum on desktop and mobile, live room still opens by url', async ({ browser }) => {
   test.setTimeout(90_000)
   await mkdir(ARTIFACTS, { recursive: true })
   const context = await browser.newContext()
   const page = await context.newPage()
 
   await page.goto('/')
-  await expect(page.getByTestId('price-watchlist')).toBeVisible()
-  await expect(page.getByTestId('price-watchlist')).toContainText('BTC')
-  await expect(page.getByTestId('price-watchlist')).toContainText('ETH')
-  await expect(page.getByTestId('price-watchlist')).toContainText('SOL')
-  await expect(page.getByTestId('price-watchlist')).toContainText('XAU')
-  await expect(page.getByTestId('price-watchlist')).toHaveAttribute('data-live', 'true', { timeout: 20_000 })
-  await expect(page.getByRole('heading', { name: 'FIBO99' })).toBeVisible()
-  await expect(page.getByRole('img', { name: 'FIBO99' })).toBeVisible()
-  await expect(page.getByTestId('follow-fibo').getByRole('link', { name: /Facebook/ })).toHaveAttribute('target', '_blank')
-  await page.screenshot({ path: `${ARTIFACTS}/screenshot_lobby_desktop.png`, fullPage: true })
+  await expect(page.getByTestId('forum-logo')).toHaveText('Bitcoin')
+  await expect(page.getByTestId('forum-index')).toBeVisible()
+  await expect(page.getByTestId('price-watchlist')).toHaveCount(0)
+  await expect(page.getByTestId('news-panel')).toHaveCount(0)
+  await expect(page.getByTestId('etf-flow')).toHaveCount(0)
+  await expect(page.getByTestId('nav-login')).toBeVisible()
+  await expect(page.getByTestId('nav-register')).toBeVisible()
+  await page.screenshot({ path: `${ARTIFACTS}/screenshot_forum_plain_desktop.png`, fullPage: true })
 
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.screenshot({ path: `${ARTIFACTS}/screenshot_lobby_mobile.png`, fullPage: true })
+  await expect(page.locator('.smf-tabbar')).toBeVisible()
+  await page.screenshot({ path: `${ARTIFACTS}/screenshot_forum_plain_mobile.png`, fullPage: true })
 
   await page.setViewportSize({ width: 1360, height: 860 })
+  await page.getByTestId('nav-login').click()
   await page.getByLabel('ชื่อบัญชี').fill('มิ้นท์ธีม')
   await page.getByLabel('รหัสผ่าน').fill('password123')
   await page.getByTestId('register').click()
@@ -33,16 +33,13 @@ test('theme lobby and room on desktop and mobile', async ({ browser }) => {
   await expect(signedIn.or(taken)).toBeVisible()
   if (await taken.isVisible()) await page.getByRole('button', { name: 'เข้าสู่ระบบ' }).click()
   await expect(signedIn).toHaveText('มิ้นท์ธีม')
-  await page.getByTestId('nav-live').click()
+  await expect(page.getByTestId('nav-profile')).toBeVisible()
+  await expect(page.getByTestId('nav-logout')).toBeVisible()
+  await page.goto('/live')
   await page.getByTestId('enter-room').click()
   await expect(page.getByTestId('room')).toBeVisible()
   await expect(page.getByTestId('connection-status')).toContainText('เชื่อมต่อแล้ว')
   await expect(page.getByTestId('follow-fibo').getByRole('link', { name: /YouTube/ })).toHaveAttribute('rel', /noopener/)
-  await page.screenshot({ path: `${ARTIFACTS}/screenshot_room_theme_desktop.png` })
-
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(page.getByTestId('follow-fibo')).toBeVisible()
-  await page.screenshot({ path: `${ARTIFACTS}/screenshot_room_theme_mobile.png` })
 
   await context.close()
 })
