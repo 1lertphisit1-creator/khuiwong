@@ -6,6 +6,7 @@ export type AppRoute =
   | { name: 'profile' }
   | { name: 'admin' }
   | { name: 'help' }
+  | { name: 'ranks' }
   | { name: 'search'; query: string }
   | { name: 'room'; code: string }
 
@@ -20,6 +21,7 @@ export function parseRoute(pathname: string, search = ''): AppRoute {
   if (/^\/profile\/?$/.test(pathname)) return { name: 'profile' }
   if (/^\/admin\/?$/.test(pathname)) return { name: 'admin' }
   if (/^\/help\/?$/.test(pathname)) return { name: 'help' }
+  if (/^\/ranks\/?$/.test(pathname)) return { name: 'ranks' }
   if (/^\/search\/?$/.test(pathname)) {
     return { name: 'search', query: new URLSearchParams(search).get('q') ?? '' }
   }

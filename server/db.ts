@@ -16,6 +16,8 @@ export type AccountRow = {
   password_hash: string
   created_at: number
   name_color?: string | null
+  activity_rank?: string | null
+  promotion_rank?: string | null
 }
 
 export type RoomRow = {
@@ -240,6 +242,8 @@ function addColumn(table: string, column: string, definition: string) {
 addColumn('rooms', 'screen_min_rank', "TEXT NOT NULL DEFAULT 'member'")
 addColumn('room_members', 'screen_blocked', 'INTEGER NOT NULL DEFAULT 0')
 addColumn('accounts', 'name_color', 'TEXT')
+addColumn('accounts', 'activity_rank', 'TEXT')
+addColumn('accounts', 'promotion_rank', 'TEXT')
 
 export function insertAccount(row: AccountRow) {
   db.prepare(

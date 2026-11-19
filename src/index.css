@@ -543,6 +543,74 @@ body:has(.smf-doc) [data-testid='bgm-player'] {
   font-weight: 700;
 }
 
+.smf-activity {
+  margin-top: 4px;
+}
+
+.smf-activity-title {
+  color: #334466;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.smf-activity-nick {
+  color: #555;
+  font-size: 11px;
+}
+
+.smf-insignia {
+  display: block;
+  width: 88px;
+  height: 32px;
+  margin: 4px 0;
+}
+
+.smf-staff-badge {
+  display: inline-block;
+  margin-bottom: 2px;
+  background: #334466;
+  padding: 1px 6px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.smf-promotion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 10px 0;
+  border: 1px solid #e0b84a;
+  background: #fff8e6;
+  padding: 8px 12px;
+  color: #334466;
+  font-weight: 700;
+}
+
+.smf-rank-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+}
+
+.smf-rank-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #d5d5d5;
+  background: #fff;
+  padding: 8px;
+}
+
+.smf-rank-list li.is-mine {
+  border-color: #334466;
+  background: #e7eef8;
+}
+
 .smf-rank,
 .smf-stars {
   color: #996600;

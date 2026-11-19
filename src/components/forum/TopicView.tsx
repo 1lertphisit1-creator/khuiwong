@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Composer, type ComposerHandle } from '@/components/forum/Composer.tsx'
-import { BbcodeBody, Crumb, ForumLink, Pages, Stars } from '@/components/forum/parts.tsx'
+import { BbcodeBody, Crumb, ForumLink, Pages } from '@/components/forum/parts.tsx'
+import { ActivityBlock } from '@/components/forum/Ranks.tsx'
 import {
   forumGet,
   forumSend,
@@ -241,9 +242,15 @@ function PostBit({
         <div className="smf-author-name" style={{ color }}>
           {post.author.name}
         </div>
-        <div className="smf-rank">{post.author.rankLabel}</div>
-        <Stars rank={post.author.rank} />
-        <div className="smf-small">Activity: {post.author.posts}</div>
+        {post.author.activity ? (
+          <ActivityBlock
+            activity={post.author.activity}
+            posts={post.author.posts}
+            staff={post.author.rank === 'owner' || post.author.rank === 'admin' || post.author.rank === 'moderator' ? post.author.rankLabel : null}
+          />
+        ) : (
+          <div className="smf-rank">{post.author.rankLabel}</div>
+        )}
         {post.author.avatarUrl ? (
           <img className="smf-avatar" src={post.author.avatarUrl} alt="" width={80} height={80} />
         ) : (
