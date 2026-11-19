@@ -89,7 +89,6 @@ export function HelpPage() {
         <div className="smf-form-body smf-help">
           <p>{forumName} เป็นกระดานถาม-ตอบ เลือกบอร์ดแล้วกด New Topic เพื่อตั้งกระทู้ หรือเปิดกระทู้แล้วกด Reply</p>
           <p>แขกอ่านได้ทุกคน การโพสต์ต้องมีบัญชี ยกเว้นผู้ดูแลเปิด guest posting</p>
-          <p>ห้องเสียง ไมค์ แชร์จอ และดีเจอยู่ที่ <ForumLink to="/live">Live Room</ForumLink></p>
           <h3>BBCode</h3>
           <ul>
             <li>[b]ตัวหนา[/b]</li>

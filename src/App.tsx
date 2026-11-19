@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Backdrop } from '@/components/Backdrop.tsx'
-import { BackgroundMusic } from '@/components/BackgroundMusic.tsx'
 import { ForumPages } from '@/components/forum/ForumPages.tsx'
 import { ForumShell } from '@/components/forum/ForumShell.tsx'
-import { MainHall } from '@/components/MainHall.tsx'
 import { NewsPanel } from '@/components/NewsPanel.tsx'
 import { RoomPage } from '@/components/RoomPage.tsx'
 import { useForumSocket } from '@/hooks/useForumSocket.ts'
@@ -28,16 +26,14 @@ export default function App() {
             <RoomPage code={route.code} />
           </div>
           <NewsPanel />
-          <BackgroundMusic />
         </div>
       </div>
     )
   }
 
   return (
-    <>
-      <ForumShell route={route}>{route.name === 'live' ? <MainHall /> : <ForumPages route={route} />}</ForumShell>
-      {route.name === 'live' ? <BackgroundMusic /> : null}
-    </>
+    <ForumShell route={route}>
+      <ForumPages route={route} />
+    </ForumShell>
   )
 }

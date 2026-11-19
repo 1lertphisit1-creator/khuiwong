@@ -18,14 +18,11 @@ import {
   nicknameKey,
   registerAccount,
 } from './auth.ts'
-import { EtfFeed, type EtfBoard } from './etf.ts'
 import { initForum, mountForum, pageShare, presenceFromToken } from './forum.ts'
 import { canonicalUrl, injectShareMeta, isSharePath } from './shareHtml.ts'
 import { NewsFeed, newsConfig } from './news.ts'
 import { PriceFeed, type PriceBoard } from './prices.ts'
-import { musicSettings, saveMusicUrl, type MusicSetting } from './music.ts'
 import {
-  accountHasStaffRank,
   addBan,
   countDjTracks,
   deleteDjTrack,
@@ -246,8 +243,6 @@ type ServerToClient = {
   'screen-chunk': (payload: { id: string; gen: number; seq: number; mime: string; chunk: Buffer }) => void
   'screen-end': (payload: { id: string; gen: number }) => void
   prices: (payload: PriceBoard) => void
-  'etf-flows': (payload: EtfBoard) => void
-  'site-settings': (payload: MusicSetting) => void
   'news-posts': (payload: { id: string; text: string; createdAt: string; url: string }[]) => void
   'participant-joined': (participant: PublicParticipant) => void
   'participant-left': (payload: { id: string }) => void
@@ -763,28 +758,6 @@ async function main() {
   }
   app.get('/api/health', health)
   app.get('/health', health)
-  app.get('/api/settings', (_req, res) => {
-    res.json(musicSettings())
-  })
-
-  app.put('/api/settings/music', (req, res) => {
-    const account = accountFromToken(bearer(req))
-    if (!account) {
-      res.status(401).json({ message: 'เข้าสู่ระบบก่อนเปลี่ยนเพลงพื้นหลัง' })
-      return
-    }
-    if (!isSiteOwnerAccount(account.id) && !accountHasStaffRank(account.id)) {
-      res.status(403).json({ message: 'เฉพาะเจ้าของหรือผู้ดูแลที่เปลี่ยนเพลงพื้นหลังได้' })
-      return
-    }
-    const saved = saveMusicUrl(typeof req.body?.musicUrl === 'string' ? req.body.musicUrl : '')
-    if (!saved) {
-      res.status(400).json({ message: 'ใส่ลิงก์ YouTube ของวิดีโอหรือเพลย์ลิสต์' })
-      return
-    }
-    io.emit('site-settings', saved)
-    res.json(saved)
-  })
 
   app.get('/api/rooms/active', (_req, res) => {
     const list = [...rooms.entries()]
@@ -802,30 +775,6 @@ async function main() {
     io.emit('prices', board)
   })
   prices.start()
-
-  const etf = new EtfFeed(
-    (board) => {
-      io.emit('etf-flows', board)
-    },
-    (asset) => prices.snapshot()?.quotes.find((quote) => quote.symbol === asset)?.usd ?? null,
-  )
-  etf.start()
-
-  app.get('/api/etf-flows', (_req, res) => {
-    if (!etf.board) {
-      res.status(200).json({
-        btc: null,
-        eth: null,
-        updatedAt: 0,
-        source: 'cache',
-        sourceUrl: 'https://farside.co.uk/',
-        stale: true,
-        message: 'ยังไม่มีข้อมูลวันนี้',
-      })
-      return
-    }
-    res.json(etf.board)
-  })
 
   const news = new NewsFeed((posts) => {
     io.emit('news-posts', posts)
@@ -1006,8 +955,6 @@ async function main() {
     const board = prices.snapshot()
     if (board) socket.emit('prices', board)
     if (news.posts.length > 0) socket.emit('news-posts', news.posts)
-    if (etf.board) socket.emit('etf-flows', etf.board)
-    socket.emit('site-settings', musicSettings())
     socket.on('forum-presence', (payload: { token?: string } | undefined) => {
       forumOnline.set(socket.id, presenceFromToken(typeof payload?.token === 'string' ? payload.token : null))
       emitForumOnline(io)

@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 
 const ARTIFACTS = '/opt/cursor/artifacts'
 
-test('plain forum on desktop and mobile, live room still opens by url', async ({ browser }) => {
+test('plain forum on desktop and mobile', async ({ browser }) => {
   test.setTimeout(90_000)
   await mkdir(ARTIFACTS, { recursive: true })
   const context = await browser.newContext()
@@ -35,11 +35,6 @@ test('plain forum on desktop and mobile, live room still opens by url', async ({
   await expect(signedIn).toHaveText('มิ้นท์ธีม')
   await expect(page.getByTestId('nav-profile')).toBeVisible()
   await expect(page.getByTestId('nav-logout')).toBeVisible()
-  await page.goto('/live')
-  await page.getByTestId('enter-room').click()
-  await expect(page.getByTestId('room')).toBeVisible()
-  await expect(page.getByTestId('connection-status')).toContainText('เชื่อมต่อแล้ว')
-  await expect(page.getByTestId('follow-fibo').getByRole('link', { name: /YouTube/ })).toHaveAttribute('rel', /noopener/)
 
   await context.close()
 })

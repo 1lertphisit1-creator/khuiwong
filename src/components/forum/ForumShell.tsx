@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { FollowLinks } from '@/components/FollowLinks.tsx'
 import { BrandingProvider } from '@/components/forum/branding.tsx'
 import { ForumLink } from '@/components/forum/parts.tsx'
 import {
@@ -16,10 +15,8 @@ import {
 } from '@/lib/forum.ts'
 import { go, type AppRoute } from '@/lib/route.ts'
 import { api, clearSession } from '@/lib/session.ts'
-import { cn } from '@/lib/utils.ts'
 
 export function ForumShell({ route, children }: { route: AppRoute; children: ReactNode }) {
-  const live = route.name === 'live'
   const [me, setMe] = useState<ForumMe | null>(null)
   const [branding, setBranding] = useState<ForumBranding>(DEFAULT_BRANDING)
   const [stats, setStats] = useState<ForumStats | null>(null)
@@ -71,7 +68,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
 
   return (
     <BrandingProvider value={branding}>
-      <div className={cn('smf-root', live ? 'smf-live' : 'smf-doc')} data-testid={route.name === 'index' ? 'lobby' : 'forum-shell'}>
+      <div className="smf-root smf-doc" data-testid={route.name === 'index' ? 'lobby' : 'forum-shell'}>
         <header className="smf-header">
           <div className="smf-hello">
             <p className="smf-logo" data-testid="forum-logo">{branding.siteName}</p>
@@ -121,11 +118,9 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
           </nav>
         </header>
 
-        {live ? <div className="smf-live-body">{children}</div> : <div className="smf-layout">{children}</div>}
+        <div className="smf-layout">{children}</div>
 
-        {live ? <FollowLinks tone="forum" /> : null}
-        {live ? null : (
-          <footer className="smf-footer" data-testid="forum-footer">
+        <footer className="smf-footer" data-testid="forum-footer">
             <p>
               {stats ? `${stats.posts} Posts in ${stats.topics} Topics by ${stats.members} Members.` : '…'} Latest Member:{' '}
               {stats?.latestMember ?? '—'}
@@ -141,8 +136,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
               ))}
             </p>
             <p className="smf-footer-brand" data-testid="forum-brand">{branding.forumName}</p>
-          </footer>
-        )}
+        </footer>
 
         <nav className="smf-tabbar lg:hidden" aria-label="Mobile">
           <button type="button" aria-current={homeCurrent ? 'page' : undefined} onClick={() => go('/')}>

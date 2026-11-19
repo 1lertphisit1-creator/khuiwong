@@ -2,7 +2,6 @@ export type AppRoute =
   | { name: 'index' }
   | { name: 'board'; id: number; page: number }
   | { name: 'topic'; id: number; page: number }
-  | { name: 'live' }
   | { name: 'login' }
   | { name: 'profile' }
   | { name: 'admin' }
@@ -17,7 +16,6 @@ export function parseRoute(pathname: string, search = ''): AppRoute {
   if (board?.[1]) return { name: 'board', id: Number(board[1]), page: pageOf(search) }
   const topic = pathname.match(/^\/topic\/(\d+)\/?$/)
   if (topic?.[1]) return { name: 'topic', id: Number(topic[1]), page: pageOf(search) }
-  if (/^\/live\/?$/.test(pathname)) return { name: 'live' }
   if (/^\/(?:login|register)\/?$/.test(pathname)) return { name: 'login' }
   if (/^\/profile\/?$/.test(pathname)) return { name: 'profile' }
   if (/^\/admin\/?$/.test(pathname)) return { name: 'admin' }
