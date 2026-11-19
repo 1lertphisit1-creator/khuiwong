@@ -177,6 +177,29 @@ async function migrate() {
       );`,
     ],
     ['004_name_color', `ALTER TABLE accounts ADD COLUMN IF NOT EXISTS name_color TEXT;`],
+    [
+      '005_views_ads',
+      `CREATE TABLE IF NOT EXISTS page_counters (
+        key TEXT PRIMARY KEY,
+        value BIGINT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS page_view_days (
+        day TEXT PRIMARY KEY,
+        views BIGINT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS page_view_seen (
+        visitor_key TEXT NOT NULL,
+        path TEXT NOT NULL,
+        seen_at BIGINT NOT NULL,
+        PRIMARY KEY (visitor_key, path)
+      );
+      CREATE TABLE IF NOT EXISTS ad_slots (
+        slot INTEGER PRIMARY KEY,
+        image_url TEXT NOT NULL DEFAULT '',
+        link_url TEXT NOT NULL DEFAULT '',
+        alt_text TEXT NOT NULL DEFAULT ''
+      );`,
+    ],
   ]
   for (const [id, sql] of migrations) {
     const existing = await client.query('SELECT id FROM schema_migrations WHERE id = $1', [id])

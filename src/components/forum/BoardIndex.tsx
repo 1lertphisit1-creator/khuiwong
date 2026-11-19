@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Crumb, ForumLink, MemberName } from '@/components/forum/parts.tsx'
+import { AdAdmin } from '@/components/forum/SiteExtras.tsx'
 import {
   forumGet,
   forumSend,
@@ -215,6 +216,7 @@ function AdminBox({
           Allow guests to post
         </label>
         {canRename ? <NameSettings branding={branding} run={run} /> : null}
+        {canRename ? <AdAdmin /> : null}
         <form
           className="smf-inline"
           onSubmit={(event) => {
