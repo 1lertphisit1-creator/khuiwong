@@ -1782,7 +1782,7 @@ async function main() {
   httpServer.listen(PORT, '0.0.0.0', () => {
     const turn = process.env.TURN_URLS || process.env.TURN_URL
     console.log(`คุยวง ready at http://127.0.0.1:${PORT}`)
-    console.log(usingPostgres() ? 'Database: PostgreSQL' : 'Database: SQLite')
+    console.log(usingPostgres() ? 'storage: postgres' : 'storage: sqlite')
     console.log(turn ? 'TURN configured' : 'TURN not set — using public STUN only')
     console.log(process.env.OWNER_SECRET ? 'OWNER_SECRET configured' : 'OWNER_SECRET not set')
   })
