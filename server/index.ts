@@ -31,6 +31,7 @@ import {
   getMember,
   avatarStamp,
   dataDir,
+  deleteAccountByNicknameKey,
   deleteAvatar,
   getPlayback,
   getRankColors,
@@ -735,6 +736,9 @@ function emitForumOnline(io: AppServer) {
 
 async function main() {
   ensureSiteOwner()
+  if (deleteAccountByNicknameKey('neonprobe084648')) {
+    console.log('removed test account neonprobe084648')
+  }
   ensureRoomRecord(MAIN_ROOM_ID, null)
   grantSiteOwnerRoom(MAIN_ROOM_ID)
   initForum()
