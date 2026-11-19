@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { AuthCard } from '@/components/AuthCard.tsx'
 import { useBranding } from '@/components/forum/branding.tsx'
 import { Crumb, ForumLink } from '@/components/forum/parts.tsx'
 import { forumGet, smfDate } from '@/lib/forum.ts'
@@ -106,16 +107,13 @@ export function HelpPage() {
   )
 }
 
-export function LoginNote() {
+export function AccountPage({ mode }: { mode: 'login' | 'profile' }) {
   return (
-    <div data-testid="forum-login">
-      <Crumb items={[{ label: 'Login' }]} />
+    <div data-testid={mode === 'profile' ? 'forum-profile' : 'forum-login'}>
+      <Crumb items={[{ label: mode === 'profile' ? 'Profile' : 'Login' }]} />
       <section className="smf-block">
-        <div className="smf-cat">Login / Register</div>
-        <div className="smf-form-body">
-          <p>กรอกชื่อบัญชีและรหัสผ่านในกล่อง Login แล้วกดเข้าสู่ระบบหรือสมัคร</p>
-          <p className="smf-small">รหัสผ่าน 8–72 ตัว ชื่อ 2–24 ตัวอักษร</p>
-        </div>
+        <div className="smf-cat">{mode === 'profile' ? 'Profile' : 'Login / Register'}</div>
+        <AuthCard onSession={() => window.dispatchEvent(new Event('khuiwong-auth'))} />
       </section>
     </div>
   )

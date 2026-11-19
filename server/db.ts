@@ -1,6 +1,7 @@
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { createPgDatabase, type SqlDatabase } from './pg-sync.ts'
 import {
   defaultRankColor,
   isRankId,
@@ -55,6 +56,45 @@ export type DjPlaybackRow = {
   started_at: number | null
 }
 
+export function writeAvatar(accountId: string, bytes: Buffer) {
+  db.prepare(
+    `INSERT INTO avatars (account_id, bytes, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(account_id) DO UPDATE SET bytes = excluded.bytes, updated_at = excluded.updated_at`,
+  ).run(accountId, bytes, Date.now())
+}
+
+export function readAvatar(accountId: string) {
+  const row = db.prepare('SELECT bytes, updated_at FROM avatars WHERE account_id = ?').get(accountId) as
+    | { bytes: Buffer | Uint8Array; updated_at: number }
+    | undefined
+  if (!row) return undefined
+  return { bytes: Buffer.from(row.bytes), updatedAt: Number(row.updated_at) }
+}
+
+export function deleteAvatar(accountId: string) {
+  db.prepare('DELETE FROM avatars WHERE account_id = ?').run(accountId)
+}
+
+export function avatarStamp(accountId: string) {
+  const row = db.prepare('SELECT updated_at FROM avatars WHERE account_id = ?').get(accountId) as
+    | { updated_at: number }
+    | undefined
+  return row ? Number(row.updated_at) : 0
+}
+
+function importAvatarFiles() {
+  const directory = path.join(dataDir(), 'avatars')
+  if (!existsSync(directory)) return
+  for (const name of readdirSync(directory)) {
+    if (!name.endsWith('.webp')) continue
+    const accountId = name.slice(0, -'.webp'.length)
+    if (avatarStamp(accountId)) continue
+    const file = path.join(directory, name)
+    writeAvatar(accountId, readFileSync(file))
+    db.prepare('UPDATE avatars SET updated_at = ? WHERE account_id = ?').run(Math.floor(statSync(file).mtimeMs), accountId)
+  }
+}
+
 export function readCache(key: string) {
   return db.prepare('SELECT payload, fetched_at FROM app_cache WHERE key = ?').get(key) as
     | { payload: string; fetched_at: number }
@@ -76,14 +116,43 @@ export function dataDir() {
 const resolvedDataDir = dataDir()
 mkdirSync(resolvedDataDir, { recursive: true })
 
-const db = new DatabaseSync(path.join(resolvedDataDir, 'khuiwong.sqlite'))
+export function usingPostgres() {
+  return Boolean(process.env.DATABASE_URL?.trim())
+}
+
+const db: SqlDatabase = usingPostgres() ? createPgDatabase() : openSqlite(resolvedDataDir)
 
 export function sqlite() {
   return db
 }
-db.exec('PRAGMA journal_mode = WAL')
-db.exec('PRAGMA foreign_keys = ON')
-db.exec(`
+
+function openSqlite(directory: string): SqlDatabase {
+  const database = new DatabaseSync(path.join(directory, 'khuiwong.sqlite'))
+  database.exec('PRAGMA journal_mode = WAL')
+  database.exec('PRAGMA foreign_keys = ON')
+  return {
+    exec(sql: string) {
+      database.exec(sql)
+    },
+    prepare(sql: string) {
+      const statement = database.prepare(sql)
+      return {
+        get(...params: unknown[]) {
+          return statement.get(...(params as never[]))
+        },
+        all(...params: unknown[]) {
+          return statement.all(...(params as never[])) as unknown[]
+        },
+        run(...params: unknown[]) {
+          const result = statement.run(...(params as never[]))
+          return { changes: Number(result.changes), lastInsertRowid: Number(result.lastInsertRowid) }
+        },
+      }
+    },
+  }
+}
+
+if (!usingPostgres()) db.exec(`
   CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     nickname TEXT NOT NULL,
@@ -150,7 +219,13 @@ db.exec(`
     offset_ms INTEGER NOT NULL DEFAULT 0,
     started_at INTEGER
   );
+  CREATE TABLE IF NOT EXISTS avatars (
+    account_id TEXT PRIMARY KEY,
+    bytes BLOB NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
 `)
+importAvatarFiles()
 
 function columnNames(table: string) {
   return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name)

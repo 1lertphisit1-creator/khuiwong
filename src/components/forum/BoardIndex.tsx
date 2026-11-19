@@ -22,7 +22,6 @@ type IndexPayload = {
 export function BoardIndex() {
   const [data, setData] = useState<IndexPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [moderate, setModerate] = useState(false)
   const loadGen = useRef(0)
 
   async function load() {
@@ -59,11 +58,6 @@ export function BoardIndex() {
             Bitcoin Discussion
           </ForumLink>
         ) : null}
-        {data.me.canModerate ? (
-          <button type="button" className="smf-button smf-button-alt" data-testid="toggle-moderate" onClick={() => setModerate((value) => !value)}>
-            {moderate ? 'Hide admin' : 'Moderate'}
-          </button>
-        ) : null}
       </div>
       {data.categories.map((category) => (
         <section key={category.id} className="smf-block" data-testid="forum-category">
@@ -86,15 +80,6 @@ export function BoardIndex() {
           </table>
         </section>
       ))}
-      {moderate && data.me.canModerate ? (
-        <AdminBox
-          categories={data.categories}
-          guestPosting={data.me.guestPosting}
-          branding={data.branding}
-          canRename={data.me.canRename}
-          onChanged={() => void load()}
-        />
-      ) : null}
     </div>
   )
 }
@@ -129,6 +114,47 @@ function BoardRow({ board, stripe }: { board: ForumBoard; stripe: boolean }) {
         )}
       </td>
     </tr>
+  )
+}
+
+export function ForumAdminPage() {
+  const [data, setData] = useState<IndexPayload | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function load() {
+    try {
+      setData(await forumGet<IndexPayload>('/api/forum'))
+      setError(null)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'โหลดไม่สำเร็จ')
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [])
+
+  if (error) return <p className="smf-error">{error}</p>
+  if (!data) return <p className="smf-small">Loading…</p>
+  if (!data.me.canModerate) {
+    return (
+      <div data-testid="forum-admin-denied">
+        <Crumb items={[{ label: 'Admin' }]} />
+        <p className="smf-note">เฉพาะผู้ดูแล</p>
+      </div>
+    )
+  }
+  return (
+    <div data-testid="forum-admin-page">
+      <Crumb items={[{ label: 'Admin' }]} />
+      <AdminBox
+        categories={data.categories}
+        guestPosting={data.me.guestPosting}
+        branding={data.branding}
+        canRename={data.me.canRename}
+        onChanged={() => void load()}
+      />
+    </div>
   )
 }
 

@@ -4,6 +4,8 @@ export type AppRoute =
   | { name: 'topic'; id: number; page: number }
   | { name: 'live' }
   | { name: 'login' }
+  | { name: 'profile' }
+  | { name: 'admin' }
   | { name: 'help' }
   | { name: 'search'; query: string }
   | { name: 'room'; code: string }
@@ -17,6 +19,8 @@ export function parseRoute(pathname: string, search = ''): AppRoute {
   if (topic?.[1]) return { name: 'topic', id: Number(topic[1]), page: pageOf(search) }
   if (/^\/live\/?$/.test(pathname)) return { name: 'live' }
   if (/^\/(?:login|register)\/?$/.test(pathname)) return { name: 'login' }
+  if (/^\/profile\/?$/.test(pathname)) return { name: 'profile' }
+  if (/^\/admin\/?$/.test(pathname)) return { name: 'admin' }
   if (/^\/help\/?$/.test(pathname)) return { name: 'help' }
   if (/^\/search\/?$/.test(pathname)) {
     return { name: 'search', query: new URLSearchParams(search).get('q') ?? '' }
