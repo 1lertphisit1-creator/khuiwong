@@ -18,6 +18,7 @@ import {
   nicknameKey,
   registerAccount,
 } from './auth.ts'
+import { compressAvatar } from './avatar.ts'
 import { initForum, mountForum, pageShare, presenceFromToken } from './forum.ts'
 import { canonicalUrl, injectShareMeta, isSharePath } from './shareHtml.ts'
 import { NewsFeed, newsConfig } from './news.ts'
@@ -464,10 +465,6 @@ function avatarUrlFor(accountId: string | null) {
   return `/api/avatars/${accountId}?v=${version}`
 }
 
-function isWebp(buf: Buffer) {
-  return buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP'
-}
-
 function canUseCam(live: LiveRoom, user: LiveUser) {
   if (user.camBlocked) return false
   return rankLevel(user.rank) >= rankLevel(live.policy.camMinRank)
@@ -862,23 +859,44 @@ async function main() {
 
   app.post(
     '/api/account/avatar',
-    express.raw({ type: 'image/webp', limit: '400kb' }),
-    (req, res) => {
+    express.raw({
+      limit: '2mb',
+      type: (req) => /^image\/(jpe?g|pjpeg|png|webp|gif)/i.test(String(req.headers['content-type'] ?? '')),
+    }),
+    async (req, res) => {
       const account = accountFromToken(bearer(req))
       if (!account) {
         res.status(401).json({ message: 'เข้าสู่ระบบก่อนอัปโหลดรูป' })
         return
       }
       const body = req.body
-      if (!Buffer.isBuffer(body) || !isWebp(body)) {
-        res.status(400).json({ message: 'ส่งรูปเป็น webp สี่เหลี่ยม ไม่เกิน 400 KB' })
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        res.status(400).json({ message: 'รองรับเฉพาะ jpg, png, webp และ gif ไม่เกิน 2 MB' })
         return
       }
-      writeAvatar(account.id, body)
-      avatarVersions.set(account.id, Date.now())
-      res.json({ avatarUrl: avatarUrlFor(account.id) })
+      try {
+        const bytes = await compressAvatar(body)
+        writeAvatar(account.id, bytes)
+        avatarVersions.set(account.id, Date.now())
+        io.emit('forum-event', { type: 'boards' })
+        res.json({ avatarUrl: avatarUrlFor(account.id) })
+      } catch (error) {
+        res.status(400).json({ message: error instanceof Error ? error.message : 'แปลงรูปไม่สำเร็จ' })
+      }
     },
   )
+
+  app.delete('/api/account/avatar', (req, res) => {
+    const account = accountFromToken(bearer(req))
+    if (!account) {
+      res.status(401).json({ message: 'เข้าสู่ระบบก่อน' })
+      return
+    }
+    deleteAvatar(account.id)
+    avatarVersions.set(account.id, 0)
+    io.emit('forum-event', { type: 'boards' })
+    res.json({ ok: true })
+  })
 
   app.get('/api/me', (req, res) => {
     const account = accountFromToken(bearer(req))
@@ -1778,6 +1796,14 @@ async function main() {
     transformHtml = (url, html) => vite.transformIndexHtml(url, html)
     app.use(vite.middlewares)
   }
+
+  app.use((error: { type?: string }, _req: Request, res: Response, next: (err?: unknown) => void) => {
+    if (error?.type === 'entity.too.large') {
+      res.status(413).json({ message: 'รูปใหญ่เกิน 2 MB' })
+      return
+    }
+    next(error)
+  })
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     const turn = process.env.TURN_URLS || process.env.TURN_URL

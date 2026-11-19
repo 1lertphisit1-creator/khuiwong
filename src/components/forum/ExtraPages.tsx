@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { AuthCard } from '@/components/AuthCard.tsx'
 import { useBranding } from '@/components/forum/branding.tsx'
-import { Crumb, ForumLink } from '@/components/forum/parts.tsx'
-import { forumGet, smfDate } from '@/lib/forum.ts'
+import { Crumb, ForumLink, MemberName } from '@/components/forum/parts.tsx'
+import { forumGet, forumSend, inkColor, smfDate, type ForumMe } from '@/lib/forum.ts'
 import { go } from '@/lib/route.ts'
+import { sessionToken } from '@/lib/session.ts'
 
 type SearchResult = {
   topicId: number
@@ -12,6 +13,7 @@ type SearchResult = {
   boardName: string
   lastPostAt: number
   lastPosterName: string
+  lastPosterColor?: string
   snippet: string
 }
 
@@ -68,7 +70,7 @@ export function SearchPage({ query }: { query: string }) {
           <li key={result.topicId} className="windowbg">
             <ForumLink to={`/topic/${result.topicId}`}>{result.subject}</ForumLink>
             <div className="smf-small">
-              {result.boardName} · {result.lastPosterName} · {smfDate(result.lastPostAt)}
+              {result.boardName} · <MemberName name={result.lastPosterName} color={result.lastPosterColor} /> · {smfDate(result.lastPostAt)}
             </div>
             <p>{result.snippet}</p>
           </li>
@@ -112,8 +114,151 @@ export function AccountPage({ mode }: { mode: 'login' | 'profile' }) {
       <Crumb items={[{ label: mode === 'profile' ? 'Profile' : 'Login' }]} />
       <section className="smf-block">
         <div className="smf-cat">{mode === 'profile' ? 'Profile' : 'Login / Register'}</div>
-        <AuthCard onSession={() => window.dispatchEvent(new Event('khuiwong-auth'))} />
+        <div className="smf-form-body">
+          <AuthCard onSession={() => window.dispatchEvent(new Event('khuiwong-auth'))} />
+          {mode === 'profile' ? <ProfileSettings /> : null}
+        </div>
       </section>
+    </div>
+  )
+}
+
+function ProfileSettings() {
+  const [me, setMe] = useState<ForumMe | null>(null)
+  const [hex, setHex] = useState('#1d3a6e')
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+
+  useEffect(() => {
+    let stopped = false
+    const load = () => {
+      void forumGet<{ me: ForumMe }>('/api/forum/bootstrap')
+        .then((payload) => {
+          if (stopped) return
+          setMe(payload.me)
+          if (payload.me.nameColor) setHex(payload.me.nameColor)
+        })
+        .catch(() => {})
+    }
+    load()
+    window.addEventListener('khuiwong-auth', load)
+    return () => {
+      stopped = true
+      window.removeEventListener('khuiwong-auth', load)
+    }
+  }, [])
+
+  if (!me?.accountId) return null
+  const picker = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#1d3a6e'
+
+  async function saveColor() {
+    setError(null)
+    setNotice(null)
+    setPending(true)
+    try {
+      const payload = await forumSend<{ me: ForumMe }>('/api/forum/name-color', 'PUT', { color: hex })
+      setMe(payload.me)
+      setNotice('บันทึกสีชื่อแล้ว')
+      window.dispatchEvent(new Event('khuiwong-auth'))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'บันทึกสีไม่สำเร็จ')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function uploadAvatar(file: File | undefined) {
+    if (!file) return
+    setError(null)
+    setNotice(null)
+    if (file.size > 2 * 1024 * 1024) {
+      setError('รูปใหญ่เกิน 2 MB')
+      return
+    }
+    setPending(true)
+    try {
+      const headers = new Headers()
+      const token = sessionToken()
+      if (token) headers.set('Authorization', `Bearer ${token}`)
+      headers.set('Content-Type', file.type || 'application/octet-stream')
+      const response = await fetch('/api/account/avatar', { method: 'POST', body: file, headers })
+      const data = (await response.json().catch(() => ({}))) as { message?: string; avatarUrl?: string }
+      if (!response.ok) throw new Error(data.message || 'อัปโหลดรูปไม่สำเร็จ')
+      setMe((current) => (current ? { ...current, avatarUrl: data.avatarUrl ?? current.avatarUrl } : current))
+      setNotice('บันทึกรูปโปรไฟล์แล้ว')
+      window.dispatchEvent(new Event('khuiwong-auth'))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'อัปโหลดรูปไม่สำเร็จ')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="smf-profile" data-testid="profile-settings">
+      <div className="smf-profile-avatar">
+        {me.avatarUrl ? (
+          <img className="smf-avatar" src={me.avatarUrl} alt="" width={80} height={80} data-testid="profile-avatar-preview" />
+        ) : (
+          <span className="smf-avatar smf-avatar-letter" data-testid="profile-avatar-preview">
+            {(me.name[0] ?? '?').toUpperCase()}
+          </span>
+        )}
+        <label className="smf-field">
+          <span>Profile picture</span>
+          <input
+            className="smf-input"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            aria-label="รูปโปรไฟล์"
+            data-testid="profile-avatar-file"
+            disabled={pending}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              void uploadAvatar(file)
+            }}
+          />
+        </label>
+        <p className="smf-small">jpg, png, webp หรือ gif ไม่เกิน 2 MB ระบบจะย่อเหลือ 128px</p>
+      </div>
+      <label className="smf-field">
+        <span>Name color</span>
+        <span className="smf-inline">
+          <input
+            type="color"
+            value={picker}
+            aria-label="ตัวเลือกสีชื่อ"
+            data-testid="profile-color"
+            onChange={(event) => setHex(event.target.value)}
+          />
+          <input
+            className="smf-input"
+            value={hex}
+            maxLength={7}
+            spellCheck={false}
+            aria-label="รหัสสีชื่อ"
+            data-testid="profile-color-hex"
+            onChange={(event) => setHex(event.target.value)}
+          />
+          <span className="smf-author-name" style={{ color: inkColor(picker) }}>
+            {me.name}
+          </span>
+        </span>
+      </label>
+      {me.colorLocked ? <p className="smf-small">ผู้ดูแลกำหนดสีชื่อไว้ สีที่เลือกจะถูกใช้เมื่อผู้ดูแลยกเลิก</p> : null}
+      <div className="smf-form-actions">
+        <button type="button" className="smf-button" data-testid="save-profile-color" disabled={pending} onClick={() => void saveColor()}>
+          Save color
+        </button>
+      </div>
+      {notice ? <p className="smf-small">{notice}</p> : null}
+      {error ? (
+        <p role="alert" className="smf-error">
+          {error}
+        </p>
+      ) : null}
     </div>
   )
 }

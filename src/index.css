@@ -639,6 +639,43 @@ body:has(.smf-doc) [data-testid='bgm-player'] {
   font-weight: 700;
 }
 
+.smf-prices {
+  margin: 8px;
+  overflow-x: auto;
+}
+
+.smf-price-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.smf-price-up {
+  color: #0b7a32;
+  font-weight: 700;
+}
+
+.smf-price-down {
+  color: #9f1d1d;
+  font-weight: 700;
+}
+
+.smf-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  border-top: 1px solid #ccc;
+  padding-top: 12px;
+}
+
+.smf-profile-avatar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .smf-online-name + .smf-online-name::before {
   content: ', ';
   color: #000;
@@ -772,6 +809,7 @@ body:has(.smf-doc) [data-testid='bgm-player'] {
 
   .smf-header,
   .smf-footer,
+  .smf-prices,
   .smf-root > [data-testid='follow-fibo'] {
     max-width: 1400px;
     margin-right: auto;

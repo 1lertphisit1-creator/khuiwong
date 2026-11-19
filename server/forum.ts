@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express'
 import { accountFromToken, nicknameKey, siteOwnerUsername } from './auth.ts'
+import { parseNameColor, storedHex } from './color.ts'
 import {
   avatarStamp,
   findAccountById,
@@ -8,6 +9,7 @@ import {
   getRankColors,
   isAccountBanned,
   sqlite,
+  updateAccountNameColor,
   usingPostgres,
 } from './db.ts'
 import { isRankId, rankLabel, rankLevel, type RankId } from './ranks.ts'
@@ -48,6 +50,8 @@ export type ForumMe = {
   rank: RankId
   rankLabel: string
   color: string
+  nameColor: string | null
+  colorLocked: boolean
   avatarUrl: string | null
   posts: number
   signature: string
@@ -275,6 +279,7 @@ export function mountForum(app: Express, io: Hub) {
         boardName: row.board_name,
         lastPostAt: row.last_post_at,
         lastPosterName: row.last_poster_name,
+        lastPosterColor: displayColor(null, row.last_poster_name),
         snippet: snippet(row.body, query),
       })),
       me: meFor(req),
@@ -666,6 +671,22 @@ export function mountForum(app: Express, io: Hub) {
     sqlite().prepare('UPDATE accounts SET signature = ? WHERE id = ?').run(signature, actor.accountId)
     res.json({ me: meFor(req) })
   })
+
+  app.put('/api/forum/name-color', (req, res) => {
+    const actor = actorFor(req)
+    if (!actor.accountId) {
+      res.status(401).json({ message: 'เข้าสู่ระบบก่อนเลือกสีชื่อ' })
+      return
+    }
+    const parsed = parseNameColor(req.body?.color)
+    if ('error' in parsed) {
+      res.status(400).json({ message: parsed.error })
+      return
+    }
+    updateAccountNameColor(actor.accountId, parsed.color)
+    io.emit('forum-event', { type: 'boards' })
+    res.json({ me: meFor(req) })
+  })
 }
 
 export function presenceFromToken(token: string | null | undefined) {
@@ -917,6 +938,8 @@ function identity(accountId: string | null, fallbackName: string) {
       name: fallbackName,
       rank: 'guest' as RankId,
       color: colors.guest,
+      nameColor: null,
+      colorLocked: false,
     }
   }
   const account = findAccountById(accountId)
@@ -933,7 +956,9 @@ function identity(accountId: string | null, fallbackName: string) {
     accountId,
     name: account?.nickname ?? fallbackName,
     rank,
-    color: member?.name_color || colors[rank],
+    color: storedHex(member?.name_color) || storedHex(account?.name_color) || colors[rank],
+    nameColor: storedHex(account?.name_color),
+    colorLocked: Boolean(storedHex(member?.name_color)),
   }
 }
 
@@ -947,6 +972,8 @@ function meFor(req: Request): ForumMe {
     rank: actor.rank,
     rankLabel: rankLabel(actor.rank),
     color: actor.color,
+    nameColor: actor.accountId ? identity(actor.accountId, actor.name).nameColor : null,
+    colorLocked: actor.accountId ? identity(actor.accountId, actor.name).colorLocked : false,
     avatarUrl: avatarUrl(actor.accountId),
     posts,
     signature: signatureOf(actor.accountId),
@@ -1033,6 +1060,7 @@ function boardSummary(board: { id: number; category_id: number; name: string; de
           topicId: last.id,
           subject: last.subject,
           name: last.last_poster_name,
+          color: displayColor(null, last.last_poster_name),
           at: last.last_post_at,
           page: Math.max(1, Math.ceil((last.reply_count + 1) / POST_PAGE)),
         }
@@ -1095,6 +1123,7 @@ function publicTopic(row: TopicRow) {
     boardId: row.board_id,
     subject: row.subject,
     authorName: row.author_name,
+    authorColor: displayColor(row.author_account_id, row.author_name),
     authorRank: rank,
     sticky: row.sticky === 1,
     locked: row.locked === 1,
@@ -1103,6 +1132,7 @@ function publicTopic(row: TopicRow) {
     createdAt: row.created_at,
     lastPostAt: row.last_post_at,
     lastPosterName: row.last_poster_name,
+    lastPosterColor: displayColor(null, row.last_poster_name),
   }
 }
 
@@ -1188,10 +1218,22 @@ function forumStats() {
   const posts = (sqlite().prepare('SELECT COUNT(*) AS n FROM forum_posts').get() as { n: number }).n
   const topics = (sqlite().prepare('SELECT COUNT(*) AS n FROM forum_topics').get() as { n: number }).n
   const members = (sqlite().prepare('SELECT COUNT(*) AS n FROM accounts').get() as { n: number }).n
-  const latest = sqlite().prepare('SELECT nickname FROM accounts ORDER BY created_at DESC LIMIT 1').get() as
-    | { nickname: string }
+  const latest = sqlite().prepare('SELECT id, nickname FROM accounts ORDER BY created_at DESC LIMIT 1').get() as
+    | { id: string; nickname: string }
     | undefined
-  return { posts, topics, members, latestMember: latest?.nickname ?? null }
+  return {
+    posts,
+    topics,
+    members,
+    latestMember: latest ? { name: latest.nickname, color: displayColor(latest.id, latest.nickname) } : null,
+  }
+}
+
+function displayColor(accountId: string | null, name: string) {
+  if (accountId) return identity(accountId, name).color
+  const account = findAccountByKey(nicknameKey(name))
+  if (account) return identity(account.id, account.nickname).color
+  return getRankColors(FORUM_ROOM).guest
 }
 
 function avatarUrl(accountId: string | null) {

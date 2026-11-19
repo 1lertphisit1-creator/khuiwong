@@ -176,6 +176,7 @@ async function migrate() {
         updated_at BIGINT NOT NULL
       );`,
     ],
+    ['004_name_color', `ALTER TABLE accounts ADD COLUMN IF NOT EXISTS name_color TEXT;`],
   ]
   for (const [id, sql] of migrations) {
     const existing = await client.query('SELECT id FROM schema_migrations WHERE id = $1', [id])

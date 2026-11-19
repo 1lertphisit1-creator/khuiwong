@@ -15,6 +15,7 @@ export type AccountRow = {
   nickname_key: string
   password_hash: string
   created_at: number
+  name_color?: string | null
 }
 
 export type RoomRow = {
@@ -238,6 +239,7 @@ function addColumn(table: string, column: string, definition: string) {
 
 addColumn('rooms', 'screen_min_rank', "TEXT NOT NULL DEFAULT 'member'")
 addColumn('room_members', 'screen_blocked', 'INTEGER NOT NULL DEFAULT 0')
+addColumn('accounts', 'name_color', 'TEXT')
 
 export function insertAccount(row: AccountRow) {
   db.prepare(
@@ -251,6 +253,10 @@ export function findAccountByKey(nicknameKey: string) {
 
 export function findAccountById(id: string) {
   return db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as AccountRow | undefined
+}
+
+export function updateAccountNameColor(accountId: string, color: string | null) {
+  db.prepare('UPDATE accounts SET name_color = ? WHERE id = ?').run(color, accountId)
 }
 
 export function insertSession(tokenHash: string, accountId: string, expiresAt: number) {

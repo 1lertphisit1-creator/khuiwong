@@ -26,6 +26,7 @@ export type ForumTopic = {
   boardId: number
   subject: string
   authorName: string
+  authorColor: string
   authorRank: RankId
   sticky: boolean
   locked: boolean
@@ -34,6 +35,7 @@ export type ForumTopic = {
   createdAt: number
   lastPostAt: number
   lastPosterName: string
+  lastPosterColor: string
 }
 
 export type ForumBoard = {
@@ -44,7 +46,7 @@ export type ForumBoard = {
   position: number
   topics: number
   posts: number
-  lastPost: { topicId: number; subject: string; name: string; at: number; page: number } | null
+  lastPost: { topicId: number; subject: string; name: string; color: string; at: number; page: number } | null
 }
 
 export type ForumCategory = {
@@ -60,6 +62,8 @@ export type ForumMe = {
   rank: RankId
   rankLabel: string
   color: string
+  nameColor: string | null
+  colorLocked: boolean
   avatarUrl: string | null
   posts: number
   signature: string
@@ -82,7 +86,7 @@ export type ForumStats = {
   posts: number
   topics: number
   members: number
-  latestMember: string | null
+  latestMember: { name: string; color: string } | null
 }
 
 export type ForumOnline = {
