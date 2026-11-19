@@ -94,6 +94,15 @@ export function initForum() {
   ensureSetting('site_name', DEFAULT_SITE_NAME)
   ensureSetting('forum_name', DEFAULT_FORUM_NAME)
   removeEtfBoard()
+  sqlite()
+    .prepare(
+      `UPDATE forum_posts SET body = REPLACE(body, ?, ?) WHERE body LIKE ?`,
+    )
+    .run(
+      'กระดานนี้เป็นที่ถาม-ตอบแบบกระทู้ ห้องเสียง ไมค์ แชร์จอ และดีเจอยู่ที่ Live Room',
+      'กระดานนี้เป็นที่ถาม-ตอบแบบกระทู้',
+      '%Live Room%',
+    )
 }
 
 function initSqliteForum() {
@@ -729,7 +738,7 @@ function seedForum() {
     const body = [
       'ยินดีต้อนรับสู่ Bitcoin',
       '',
-      'กระดานนี้เป็นที่ถาม-ตอบแบบกระทู้ ห้องเสียง ไมค์ แชร์จอ และดีเจอยู่ที่ Live Room',
+      'กระดานนี้เป็นที่ถาม-ตอบแบบกระทู้',
       '',
       '[quote author=Satoshi Nakamoto date=January 03, 2009]',
       'The Times 03/Jan/2009 Chancellor on brink of second bailout for banks',
@@ -821,7 +830,7 @@ function homeShare(siteName: string): PageShare {
   return {
     title: siteName,
     documentTitle: siteName,
-    description: `${siteName} กระดานถาม-ตอบ และห้องคุยสด คุยวง by FIBO99`,
+    description: 'Bitcoin กระดานถาม-ตอบ',
     siteName,
     type: 'website',
     imageUrl: null,
