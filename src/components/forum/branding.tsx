@@ -16,7 +16,7 @@ export function useBranding() {
 
 function applyDocumentBranding(siteName: string) {
   document.title = siteName
-  const description = `${siteName} กระดานถาม-ตอบ และห้องคุยสด คุยวง by FIBO99`
+  const description = 'Bitcoin กระดานถาม-ตอบ'
   setMeta('description', description)
   setMeta('og:title', siteName, true)
   setMeta('og:description', description, true)

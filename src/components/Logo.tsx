@@ -11,10 +11,9 @@ export function Logo({ className, compact = false }: { className?: string; compa
         className="h-9 w-9 shrink-0 rounded-full object-cover shadow-[0_0_0_1px_#1a120b,0_0_0_2px_#d4b36a]"
       />
       <span className="min-w-0 leading-none">
-        <span className={cn('font-display block font-bold tracking-tight', compact ? 'hidden text-sm min-[480px]:block' : 'text-[1.35rem] sm:text-[1.55rem]')}>
+        <span className={cn('font-display block font-bold tracking-tight', compact ? 'text-sm' : 'text-[1.35rem] sm:text-[1.55rem]')}>
           คุยวง
         </span>
-        <span className="mt-0.5 block text-[10px] tracking-[0.14em] text-gold">{compact ? 'FIBO99' : 'by FIBO99'}</span>
       </span>
     </span>
   )
