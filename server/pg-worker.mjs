@@ -5,30 +5,12 @@ pg.types.setTypeParser(20, (value) => Number(value))
 
 const IDENTITY = new Set(['forum_categories', 'forum_boards', 'forum_topics', 'forum_posts'])
 const pool = new pg.Pool({
-  ...pgOptions(preferPooler(process.env.DATABASE_URL)),
+  ...pgOptions(process.env.DATABASE_URL),
   max: 2,
-  idleTimeoutMillis: 0,
+  idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
   keepAlive: true,
 })
-const warmTimer = setInterval(() => {
-  pool.query('SELECT 1').catch(() => {})
-}, 20_000)
-warmTimer.unref?.()
-
-function preferPooler(connectionString) {
-  if (!connectionString) return connectionString
-  try {
-    const url = new URL(connectionString)
-    const host = url.hostname
-    if (host.endsWith('.neon.tech') && !host.includes('-pooler')) {
-      url.hostname = host.replace(/^([^.]+)\./, '$1-pooler.')
-    }
-    return url.toString()
-  } catch {
-    return connectionString
-  }
-}
 
 function pgOptions(connectionString) {
   let ssl
@@ -257,7 +239,12 @@ async function migrate() {
   }
 }
 
-let chain = migrate()
+let chain = migrate().then(() => {
+  const warmTimer = setInterval(() => {
+    pool.query('SELECT 1').catch(() => {})
+  }, 20_000)
+  warmTimer.unref?.()
+})
 
 async function handle(message) {
   if (message.op === 'exec') {
