@@ -183,6 +183,13 @@ async function migrate() {
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS promotion_rank TEXT;`,
     ],
     [
+      '007_ad_files',
+      `ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_bytes BYTEA;
+      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_type TEXT NOT NULL DEFAULT '';
+      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_updated BIGINT NOT NULL DEFAULT 0;`,
+    ],
+    [
       '005_views_ads',
       `CREATE TABLE IF NOT EXISTS page_counters (
         key TEXT PRIMARY KEY,
