@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { Express, Request, Response } from 'express'
 import { accountFromToken, nicknameKey, siteOwnerUsername } from './auth.ts'
 import { parseNameColor, storedHex } from './color.ts'
@@ -98,6 +99,7 @@ export function initForum() {
   ensureSetting('site_name', DEFAULT_SITE_NAME)
   ensureSetting('forum_name', DEFAULT_FORUM_NAME)
   removeEtfBoard()
+  ensureTrafficTables()
   sqlite()
     .prepare(
       `UPDATE forum_posts SET body = REPLACE(body, ?, ?) WHERE body LIKE ?`,
@@ -174,6 +176,42 @@ export function mountForum(app: Express, io: Hub) {
 
   app.get('/api/forum/bootstrap', (req, res) => {
     res.json({ me: meFor(req), stats: forumStats(), branding: forumBranding() })
+  })
+
+  app.post('/api/forum/views', (req, res) => {
+    const path = cleanViewPath(req.body?.path)
+    if (!path) {
+      res.json(viewTotals())
+      return
+    }
+    res.json(recordPageView(visitorKey(req.body?.visitor, req.ip || ''), path))
+  })
+
+  app.get('/api/forum/ads', (_req, res) => {
+    res.json({ slots: listAds() })
+  })
+
+  app.put('/api/forum/ads/:slot', (req, res) => {
+    if (actorFor(req).rank !== 'owner') {
+      res.status(403).json({ message: 'เฉพาะเจ้าของเว็บตั้งป้ายโฆษณาได้' })
+      return
+    }
+    const slot = Number(req.params.slot)
+    if (!Number.isInteger(slot) || slot < 1 || slot > 5) {
+      res.status(404).json({ message: 'ไม่พบช่องโฆษณานี้' })
+      return
+    }
+    const imageUrl = httpUrl(req.body?.imageUrl)
+    const linkUrl = httpUrl(req.body?.linkUrl)
+    const alt = cleanPlain(req.body?.alt ?? '', 0, 120)
+    if (imageUrl == null || linkUrl == null || alt == null) {
+      res.status(400).json({ message: 'ใส่ลิงก์รูปและลิงก์ปลายทางเป็น http หรือ https' })
+      return
+    }
+    sqlite()
+      .prepare('UPDATE ad_slots SET image_url = ?, link_url = ?, alt_text = ? WHERE slot = ?')
+      .run(imageUrl, linkUrl, alt, slot)
+    res.json({ slots: listAds() })
   })
 
   app.get('/api/forum/boards/:id', (req, res) => {
@@ -1241,6 +1279,114 @@ function avatarUrl(accountId: string | null) {
   const stamp = avatarStamp(accountId)
   if (!stamp) return null
   return `/api/avatars/${accountId}?v=${stamp}`
+}
+
+const VIEW_WINDOW_MS = 30 * 60 * 1000
+
+function ensureTrafficTables() {
+  sqlite().exec(`
+    CREATE TABLE IF NOT EXISTS page_counters (
+      key TEXT PRIMARY KEY,
+      value BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS page_view_days (
+      day TEXT PRIMARY KEY,
+      views BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS page_view_seen (
+      visitor_key TEXT NOT NULL,
+      path TEXT NOT NULL,
+      seen_at BIGINT NOT NULL,
+      PRIMARY KEY (visitor_key, path)
+    );
+    CREATE TABLE IF NOT EXISTS ad_slots (
+      slot INTEGER PRIMARY KEY,
+      image_url TEXT NOT NULL DEFAULT '',
+      link_url TEXT NOT NULL DEFAULT '',
+      alt_text TEXT NOT NULL DEFAULT ''
+    );
+  `)
+  const insert = sqlite().prepare(
+    'INSERT INTO ad_slots (slot, image_url, link_url, alt_text) VALUES (?, ?, ?, ?) ON CONFLICT(slot) DO NOTHING',
+  )
+  for (let slot = 1; slot <= 5; slot += 1) insert.run(slot, '', '', '')
+}
+
+function bangkokDay(now = Date.now()) {
+  return new Date(now + 7 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+function visitorKey(raw: unknown, ip: string) {
+  const id = typeof raw === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(raw) ? raw : ip || 'anon'
+  return createHash('sha256').update(id).digest('hex').slice(0, 32)
+}
+
+function cleanViewPath(input: unknown) {
+  if (typeof input !== 'string') return null
+  const path = input.split('#')[0]?.slice(0, 180) ?? ''
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return null
+  if (path.startsWith('/api') || path.startsWith('/socket.io') || path.startsWith('/room')) return null
+  return path
+}
+
+function viewTotals() {
+  const totalRow = sqlite().prepare(`SELECT value FROM page_counters WHERE key = 'total'`).get() as { value: number } | undefined
+  const todayRow = sqlite().prepare('SELECT views FROM page_view_days WHERE day = ?').get(bangkokDay()) as { views: number } | undefined
+  return { total: Number(totalRow?.value ?? 0), today: Number(todayRow?.views ?? 0) }
+}
+
+function recordPageView(visitor: string, path: string) {
+  const now = Date.now()
+  const db = sqlite()
+  db.prepare('DELETE FROM page_view_seen WHERE seen_at < ?').run(now - VIEW_WINDOW_MS)
+  const seen = db.prepare('SELECT seen_at FROM page_view_seen WHERE visitor_key = ? AND path = ?').get(visitor, path) as
+    | { seen_at: number }
+    | undefined
+  if (!seen || now - Number(seen.seen_at) >= VIEW_WINDOW_MS) {
+    db.prepare(
+      `INSERT INTO page_view_seen (visitor_key, path, seen_at) VALUES (?, ?, ?)
+       ON CONFLICT(visitor_key, path) DO UPDATE SET seen_at = excluded.seen_at`,
+    ).run(visitor, path, now)
+    db.prepare(
+      `INSERT INTO page_counters (key, value) VALUES ('total', 1)
+       ON CONFLICT(key) DO UPDATE SET value = page_counters.value + 1`,
+    ).run()
+    db.prepare(
+      `INSERT INTO page_view_days (day, views) VALUES (?, 1)
+       ON CONFLICT(day) DO UPDATE SET views = page_view_days.views + 1`,
+    ).run(bangkokDay(now))
+  }
+  return viewTotals()
+}
+
+function listAds() {
+  const rows = sqlite()
+    .prepare('SELECT slot, image_url, link_url, alt_text FROM ad_slots ORDER BY slot ASC')
+    .all() as { slot: number; image_url: string; link_url: string; alt_text: string }[]
+  const bySlot = new Map(rows.map((row) => [Number(row.slot), row]))
+  return [1, 2, 3, 4, 5].map((slot) => {
+    const row = bySlot.get(slot)
+    return {
+      slot,
+      imageUrl: row?.image_url ?? '',
+      linkUrl: row?.link_url ?? '',
+      alt: row?.alt_text ?? '',
+    }
+  })
+}
+
+function httpUrl(input: unknown) {
+  if (input == null || input === '') return ''
+  if (typeof input !== 'string') return null
+  const value = input.trim()
+  if (!value || value.length > 500) return value ? null : ''
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return url.href
+  } catch {
+    return null
+  }
 }
 
 function removeEtfBoard() {

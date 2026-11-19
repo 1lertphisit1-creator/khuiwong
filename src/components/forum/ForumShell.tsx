@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { BrandingProvider } from '@/components/forum/branding.tsx'
 import { ForumLink, MemberName } from '@/components/forum/parts.tsx'
+import { AdSlots, VisitCounter } from '@/components/forum/SiteExtras.tsx'
 import { PriceWatchlist } from '@/components/PriceWatchlist.tsx'
 import {
   DEFAULT_BRANDING,
@@ -118,6 +119,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
             )}
           </nav>
         </header>
+        <VisitCounter route={route} online={online?.total ?? null} />
 
         <div className="smf-layout">{children}</div>
 
@@ -138,6 +140,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
             </p>
             <p className="smf-footer-brand" data-testid="forum-brand">{branding.forumName}</p>
         </footer>
+        <AdSlots />
         <PriceWatchlist />
 
         <nav className="smf-tabbar lg:hidden" aria-label="Mobile">
