@@ -9,17 +9,20 @@ export function PriceWatchlist() {
 
   useEffect(() => {
     let stopped = false
-    void fetch('/api/prices')
-      .then((response) => (response.ok ? (response.json() as Promise<PriceBoard>) : null))
-      .then((payload) => {
-        if (!stopped && payload) setBoard(payload)
-      })
-      .catch(() => {})
+    const timer = window.setTimeout(() => {
+      void fetch('/api/prices')
+        .then((response) => (response.ok ? (response.json() as Promise<PriceBoard>) : null))
+        .then((payload) => {
+          if (!stopped && payload) setBoard(payload)
+        })
+        .catch(() => {})
+    }, 400)
     const stop = onPrices((next) => {
       if (!stopped) setBoard(next)
     })
     return () => {
       stopped = true
+      window.clearTimeout(timer)
       stop()
     }
   }, [])

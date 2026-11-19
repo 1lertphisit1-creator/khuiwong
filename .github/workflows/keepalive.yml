@@ -1,0 +1,14 @@
+name: keepalive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Wake the site and Neon
+        run: curl --fail --silent --show-error --max-time 30 https://khuiwong.onrender.com/healthz

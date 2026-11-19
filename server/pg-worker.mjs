@@ -4,7 +4,31 @@ import { parentPort } from 'node:worker_threads'
 pg.types.setTypeParser(20, (value) => Number(value))
 
 const IDENTITY = new Set(['forum_categories', 'forum_boards', 'forum_topics', 'forum_posts'])
-const client = new pg.Client(pgOptions(process.env.DATABASE_URL))
+const pool = new pg.Pool({
+  ...pgOptions(preferPooler(process.env.DATABASE_URL)),
+  max: 2,
+  idleTimeoutMillis: 0,
+  connectionTimeoutMillis: 10_000,
+  keepAlive: true,
+})
+const warmTimer = setInterval(() => {
+  pool.query('SELECT 1').catch(() => {})
+}, 20_000)
+warmTimer.unref?.()
+
+function preferPooler(connectionString) {
+  if (!connectionString) return connectionString
+  try {
+    const url = new URL(connectionString)
+    const host = url.hostname
+    if (host.endsWith('.neon.tech') && !host.includes('-pooler')) {
+      url.hostname = host.replace(/^([^.]+)\./, '$1-pooler.')
+    }
+    return url.toString()
+  } catch {
+    return connectionString
+  }
+}
 
 function pgOptions(connectionString) {
   let ssl
@@ -35,7 +59,7 @@ function withReturning(sql) {
 async function pragma(sql) {
   const match = sql.trim().match(/^pragma\s+table_info\(([a-z_]+)\)$/i)
   if (!match?.[1]) throw new Error('Unsupported statement')
-  const result = await client.query(
+  const result = await pool.query(
     `SELECT column_name AS name
      FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = $1
@@ -183,13 +207,6 @@ async function migrate() {
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS promotion_rank TEXT;`,
     ],
     [
-      '007_ad_files',
-      `ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1;
-      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_bytes BYTEA;
-      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_type TEXT NOT NULL DEFAULT '';
-      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_updated BIGINT NOT NULL DEFAULT 0;`,
-    ],
-    [
       '005_views_ads',
       `CREATE TABLE IF NOT EXISTS page_counters (
         key TEXT PRIMARY KEY,
@@ -212,7 +229,16 @@ async function migrate() {
         alt_text TEXT NOT NULL DEFAULT ''
       );`,
     ],
+    [
+      '007_ad_files',
+      `ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_bytes BYTEA;
+      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_type TEXT NOT NULL DEFAULT '';
+      ALTER TABLE ad_slots ADD COLUMN IF NOT EXISTS image_updated BIGINT NOT NULL DEFAULT 0;`,
+    ],
   ]
+  const client = await pool.connect()
+  try {
   for (const [id, sql] of migrations) {
     const existing = await client.query('SELECT id FROM schema_migrations WHERE id = $1', [id])
     if (existing.rowCount) continue
@@ -226,13 +252,16 @@ async function migrate() {
       throw error
     }
   }
+  } finally {
+    client.release()
+  }
 }
 
-let chain = client.connect().then(() => migrate())
+let chain = migrate()
 
 async function handle(message) {
   if (message.op === 'exec') {
-    await client.query(message.sql)
+    await pool.query(message.sql)
     return { ok: true }
   }
   if (/^pragma\s+table_info\(/i.test(message.sql.trim())) {
@@ -240,7 +269,7 @@ async function handle(message) {
     return message.op === 'get' ? { ok: true, row: rows[0] ?? null } : { ok: true, rows }
   }
   const sql = message.op === 'run' ? withReturning(translate(message.sql)) : translate(message.sql)
-  const result = await client.query(sql, message.params ?? [])
+  const result = await pool.query(sql, message.params ?? [])
   if (message.op === 'get') return { ok: true, row: result.rows[0] ?? null }
   if (message.op === 'all') return { ok: true, rows: result.rows }
   return {
