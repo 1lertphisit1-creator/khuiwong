@@ -3,9 +3,21 @@ import { AuthCard } from '@/components/AuthCard.tsx'
 import { EtfFlowCard } from '@/components/EtfFlowCard.tsx'
 import { FollowLinks } from '@/components/FollowLinks.tsx'
 import { NewsPanel } from '@/components/NewsPanel.tsx'
+import { BrandingProvider } from '@/components/forum/branding.tsx'
 import { ForumLink } from '@/components/forum/parts.tsx'
 import { PriceWatchlist } from '@/components/PriceWatchlist.tsx'
-import { forumGet, inkColor, onForum, publishForum, smfDate, type ForumMe, type ForumOnline, type ForumStats } from '@/lib/forum.ts'
+import {
+  DEFAULT_BRANDING,
+  forumGet,
+  inkColor,
+  onForum,
+  publishForum,
+  smfDate,
+  type ForumBranding,
+  type ForumMe,
+  type ForumOnline,
+  type ForumStats,
+} from '@/lib/forum.ts'
 import { go, type AppRoute } from '@/lib/route.ts'
 import { api, clearSession } from '@/lib/session.ts'
 import { cn } from '@/lib/utils.ts'
@@ -18,6 +30,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
   const routeStamp = `${route.name}:${'id' in route ? route.id : ''}:${'page' in route ? route.page : ''}:${'query' in route ? route.query : ''}`
   const [seenRoute, setSeenRoute] = useState(routeStamp)
   const [me, setMe] = useState<ForumMe | null>(null)
+  const [branding, setBranding] = useState<ForumBranding>(DEFAULT_BRANDING)
   const [stats, setStats] = useState<ForumStats | null>(null)
   const [online, setOnline] = useState<ForumOnline | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -38,11 +51,12 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
   useEffect(() => {
     let stopped = false
     const load = () => {
-      void forumGet<{ me: ForumMe; stats: ForumStats }>('/api/forum/bootstrap')
+      void forumGet<{ me: ForumMe; stats: ForumStats; branding: ForumBranding }>('/api/forum/bootstrap')
         .then((payload) => {
           if (stopped) return
           setMe(payload.me)
           setStats(payload.stats)
+          if (payload.branding?.siteName && payload.branding.forumName) setBranding(payload.branding)
         })
         .catch(() => {})
     }
@@ -83,12 +97,13 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
   const homeCurrent = route.name === 'index' || route.name === 'board' || route.name === 'topic'
 
   return (
+    <BrandingProvider value={branding}>
     <div className={cn('smf-root', live ? 'smf-live' : 'smf-doc')} data-testid={route.name === 'index' ? 'lobby' : 'forum-shell'}>
       <header className="smf-header">
         <div className="smf-hello">
           <div>
-            <p className="smf-logo">FIBO99 Forum</p>
-            <p className="smf-small">คุยวง</p>
+            <p className="smf-logo" data-testid="forum-logo">{branding.siteName}</p>
+            <p className="smf-small">คุยวง by FIBO99</p>
           </div>
           <div className="smf-userstrip">
             <p data-testid="forum-hello">
@@ -198,7 +213,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
               </span>
             ))}
           </p>
-          <p className="smf-footer-brand">FIBO99 Forum</p>
+          <p className="smf-footer-brand" data-testid="forum-brand">{branding.forumName}</p>
         </footer>
       )}
 
@@ -223,6 +238,7 @@ export function ForumShell({ route, children }: { route: AppRoute; children: Rea
         </button>
       </nav>
     </div>
+    </BrandingProvider>
   )
 }
 

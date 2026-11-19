@@ -65,10 +65,18 @@ export type ForumMe = {
   signature: string
   canPost: boolean
   canModerate: boolean
+  canRename: boolean
   guestPosting: boolean
   textMuted: boolean
   postBlock: string | null
 }
+
+export type ForumBranding = {
+  siteName: string
+  forumName: string
+}
+
+export const DEFAULT_BRANDING: ForumBranding = { siteName: 'Bitcoin', forumName: 'Bitcoin' }
 
 export type ForumStats = {
   posts: number

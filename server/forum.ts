@@ -16,6 +16,8 @@ import { isRankId, rankLabel, rankLevel, type RankId } from './ranks.ts'
 const FORUM_ROOM = 'MAIN'
 const TOPIC_PAGE = 20
 const POST_PAGE = 15
+const DEFAULT_SITE_NAME = 'Bitcoin'
+const DEFAULT_FORUM_NAME = 'Bitcoin'
 const lastPostAt = new Map<string, number>()
 const viewSeen = new Map<string, number>()
 
@@ -52,6 +54,7 @@ export type ForumMe = {
   signature: string
   canPost: boolean
   canModerate: boolean
+  canRename: boolean
   guestPosting: boolean
   textMuted: boolean
   postBlock: string | null
@@ -137,18 +140,18 @@ export function initForum() {
   }
   const categories = db.prepare('SELECT COUNT(*) AS n FROM forum_categories').get() as { n: number }
   if (categories.n === 0) seedForum()
-  if (!setting('guest_posting')) {
-    db.prepare('INSERT INTO forum_settings (key, value) VALUES (?, ?)').run('guest_posting', '0')
-  }
+  ensureSetting('guest_posting', '0')
+  ensureSetting('site_name', DEFAULT_SITE_NAME)
+  ensureSetting('forum_name', DEFAULT_FORUM_NAME)
 }
 
 export function mountForum(app: Express, io: Hub) {
   app.get('/api/forum', (req, res) => {
-    res.json({ categories: listCategories(), me: meFor(req), stats: forumStats() })
+    res.json({ categories: listCategories(), me: meFor(req), stats: forumStats(), branding: forumBranding() })
   })
 
   app.get('/api/forum/bootstrap', (req, res) => {
-    res.json({ me: meFor(req), stats: forumStats() })
+    res.json({ me: meFor(req), stats: forumStats(), branding: forumBranding() })
   })
 
   app.get('/api/forum/boards/:id', (req, res) => {
@@ -590,17 +593,45 @@ export function mountForum(app: Express, io: Hub) {
   })
 
   app.put('/api/forum/settings', (req, res) => {
-    if (!requireMod(req, res)) return
+    const actor = actorFor(req)
+    const renaming = req.body?.siteName != null || req.body?.forumName != null
+    if (renaming) {
+      if (actor.rank !== 'owner') {
+        res.status(403).json({ message: 'เฉพาะเจ้าของเปลี่ยนชื่อเว็บได้' })
+        return
+      }
+      if (req.body?.siteName != null) {
+        const siteName = cleanPlain(req.body.siteName, 1, 40)
+        if (!siteName) {
+          res.status(400).json({ message: 'ชื่อเว็บต้องมี 1–40 ตัวอักษร' })
+          return
+        }
+        saveSetting('site_name', siteName)
+      }
+      if (req.body?.forumName != null) {
+        const forumName = cleanPlain(req.body.forumName, 1, 40)
+        if (!forumName) {
+          res.status(400).json({ message: 'ชื่อฟอรัมต้องมี 1–40 ตัวอักษร' })
+          return
+        }
+        saveSetting('forum_name', forumName)
+      }
+    }
     if (typeof req.body?.guestPosting === 'boolean') {
-      sqlite()
-        .prepare(
-          `INSERT INTO forum_settings (key, value) VALUES ('guest_posting', ?)
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-        )
-        .run(req.body.guestPosting ? '1' : '0')
+      if (!actor.canModerate) {
+        res.status(403).json({ message: 'เฉพาะผู้ดูแลจัดการบอร์ดได้' })
+        return
+      }
+      saveSetting('guest_posting', req.body.guestPosting ? '1' : '0')
+    }
+    if (!renaming && typeof req.body?.guestPosting !== 'boolean') {
+      if (!actor.canModerate) {
+        res.status(403).json({ message: 'เฉพาะผู้ดูแลจัดการบอร์ดได้' })
+        return
+      }
     }
     io.emit('forum-event', { type: 'boards' })
-    res.json({ me: meFor(req) })
+    res.json({ me: meFor(req), branding: forumBranding() })
   })
 
   app.put('/api/forum/signature', (req, res) => {
@@ -685,10 +716,10 @@ function seedForum() {
         `INSERT INTO forum_topics (
           board_id, subject, author_account_id, author_name, author_rank, sticky, locked, views, reply_count, created_at, last_post_at, last_poster_name
         ) VALUES (?, ?, ?, ?, 'owner', 1, 0, 0, 0, ?, ?, ?)`,
-      ).run(welcomeBoard, 'Welcome to FIBO99 Forum', accountId, name, now, now, name).lastInsertRowid,
+      ).run(welcomeBoard, 'Welcome to Bitcoin', accountId, name, now, now, name).lastInsertRowid,
     )
     const body = [
-      'ยินดีต้อนรับสู่ FIBO99 Forum',
+      'ยินดีต้อนรับสู่ Bitcoin',
       '',
       'กระดานนี้เป็นที่ถาม-ตอบแบบกระทู้ ห้องเสียง ไมค์ แชร์จอ และดีเจอยู่ที่ Live Room',
       '',
@@ -712,6 +743,27 @@ function seedForum() {
 function setting(key: string) {
   const row = sqlite().prepare('SELECT value FROM forum_settings WHERE key = ?').get(key) as { value: string } | undefined
   return row?.value ?? null
+}
+
+function ensureSetting(key: string, value: string) {
+  if (setting(key)) return
+  saveSetting(key, value)
+}
+
+function saveSetting(key: string, value: string) {
+  sqlite()
+    .prepare(
+      `INSERT INTO forum_settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+    .run(key, value)
+}
+
+function forumBranding() {
+  return {
+    siteName: setting('site_name') || DEFAULT_SITE_NAME,
+    forumName: setting('forum_name') || DEFAULT_FORUM_NAME,
+  }
 }
 
 function guestPosting() {
@@ -789,6 +841,7 @@ function meFor(req: Request): ForumMe {
     signature: signatureOf(actor.accountId),
     canPost: !block,
     canModerate: actor.canModerate,
+    canRename: actor.rank === 'owner',
     guestPosting: guestPosting(),
     textMuted: actor.textMuted,
     postBlock: block?.message ?? null,

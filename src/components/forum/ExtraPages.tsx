@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useBranding } from '@/components/forum/branding.tsx'
 import { Crumb, ForumLink } from '@/components/forum/parts.tsx'
 import { forumGet, smfDate } from '@/lib/forum.ts'
 import { go } from '@/lib/route.ts'
@@ -78,13 +79,14 @@ export function SearchPage({ query }: { query: string }) {
 }
 
 export function HelpPage() {
+  const { forumName } = useBranding()
   return (
     <div data-testid="forum-help">
       <Crumb items={[{ label: 'Help' }]} />
       <section className="smf-block">
         <div className="smf-cat">Help</div>
         <div className="smf-form-body smf-help">
-          <p>FIBO99 Forum เป็นกระดานถาม-ตอบ เลือกบอร์ดแล้วกด New Topic เพื่อตั้งกระทู้ หรือเปิดกระทู้แล้วกด Reply</p>
+          <p>{forumName} เป็นกระดานถาม-ตอบ เลือกบอร์ดแล้วกด New Topic เพื่อตั้งกระทู้ หรือเปิดกระทู้แล้วกด Reply</p>
           <p>แขกอ่านได้ทุกคน การโพสต์ต้องมีบัญชี ยกเว้นผู้ดูแลเปิด guest posting</p>
           <p>ห้องเสียง ไมค์ แชร์จอ และดีเจอยู่ที่ <ForumLink to="/live">Live Room</ForumLink></p>
           <h3>BBCode</h3>
