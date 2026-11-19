@@ -766,6 +766,100 @@ function forumBranding() {
   }
 }
 
+export type PageShare = {
+  title: string
+  documentTitle: string
+  description: string
+  siteName: string
+  type: 'article' | 'website'
+  imageUrl: string | null
+}
+
+export function pageShare(pathname: string): PageShare {
+  const branding = forumBranding()
+  const home = homeShare(branding.siteName)
+  const topicMatch = pathname.match(/^\/topic\/(\d+)\/?$/)
+  if (topicMatch) {
+    const topic = getTopic(Number(topicMatch[1]))
+    if (!topic) return home
+    const body = firstPostBody(topic.id)
+    const description = clipText(stripMarkup(body), 200) || topic.subject
+    return {
+      title: topic.subject,
+      documentTitle: `${topic.subject} · ${branding.siteName}`,
+      description,
+      siteName: branding.siteName,
+      type: 'article',
+      imageUrl: firstImageUrl(body),
+    }
+  }
+  const boardMatch = pathname.match(/^\/board\/(\d+)\/?$/)
+  if (boardMatch) {
+    const board = getBoard(Number(boardMatch[1]))
+    if (!board) return home
+    return {
+      title: board.name,
+      documentTitle: `${board.name} · ${branding.siteName}`,
+      description: clipText(board.description, 200) || home.description,
+      siteName: branding.siteName,
+      type: 'website',
+      imageUrl: null,
+    }
+  }
+  return home
+}
+
+function homeShare(siteName: string): PageShare {
+  return {
+    title: siteName,
+    documentTitle: siteName,
+    description: `${siteName} กระดานถาม-ตอบ และห้องคุยสด คุยวง by FIBO99`,
+    siteName,
+    type: 'website',
+    imageUrl: null,
+  }
+}
+
+function firstPostBody(topicId: number) {
+  const row = sqlite()
+    .prepare('SELECT body FROM forum_posts WHERE topic_id = ? ORDER BY id ASC LIMIT 1')
+    .get(topicId) as { body: string } | undefined
+  return row?.body ?? ''
+}
+
+function firstImageUrl(body: string) {
+  const match = body.match(/\[img\]\s*(https?:\/\/[^\]\s]+)\s*\[\/img\]/i)
+  const raw = match?.[1]
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return url.href
+  } catch {
+    return null
+  }
+}
+
+function stripMarkup(input: string) {
+  return input
+    .replace(/\r\n/g, '\n')
+    .replace(/\[img\][\s\S]*?\[\/img\]/gi, ' ')
+    .replace(/\[code\]([\s\S]*?)\[\/code\]/gi, ' $1 ')
+    .replace(/\[url=([^\]]+)\]([\s\S]*?)\[\/url\]/gi, ' $2 ')
+    .replace(/\[url\]([\s\S]*?)\[\/url\]/gi, ' $1 ')
+    .replace(/\[\/?[a-z0-9]+(?:[^\]]*)\]/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&(?:amp|lt|gt|quot|#39);/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function clipText(text: string, max: number) {
+  const chars = [...text]
+  if (chars.length <= max) return text
+  return `${chars.slice(0, max - 1).join('').trimEnd()}…`
+}
+
 function guestPosting() {
   return setting('guest_posting') === '1'
 }
